@@ -7,7 +7,7 @@ import torch.optim as optim
 import torch.optim.lr_scheduler as sched
 import numpy as np
 
-from style.transforms import mean, std
+from style.transforms import mean, std, normalize, denormalize
 
 class IteratedStyleTransfer:
     def __init__(self, dev=None, avgpool=True):
@@ -32,14 +32,14 @@ class IteratedStyleTransfer:
     def iterate(self, p, a, cid, sids, niter=200, lr=1e-2, wc=1, ws=1e3, x=None):
         from tqdm import tqdm
     
-        p = p.to(self.dev).unsqueeze(0)
-        a = a.to(self.dev).unsqueeze(0)    
+        p = normalize(p).to(self.dev).unsqueeze(0)
+        a = normalize(a).to(self.dev).unsqueeze(0)    
 
         # Larger noise leads to more diverse images, but convergence is slower.
         if x is None:
             x = torch.tensor(torch.randn_like(p)*5e-2, requires_grad=True).to(self.dev)
         else:
-            x = x.to(self.dev).unsqueeze(0).requires_grad_()
+            x = normalize(x).to(self.dev).unsqueeze(0).requires_grad_()
         
         opt = optim.Adam([x], lr=lr)
         scheduler = sched.ReduceLROnPlateau(opt, 'min', threshold=1e-3, patience=20, cooldown=50, min_lr=1e-3)

@@ -21,10 +21,8 @@ class Clip:
     
 class ToNumpy():
     def __call__(self, tensor):
-        t = np.transpose(tensor.detach().numpy(), (1, 2, 0))
-        t *= 255.
-        return t.astype(np.uint8)
-
+        return np.transpose(tensor.numpy(), (0, 2, 3, 1))
+        
 normalize = t.Compose([
     t.ToTensor(), # 0..1
     t.Normalize(mean=mean, std=std)    
@@ -32,6 +30,21 @@ normalize = t.Compose([
 
 denormalize = t.Compose([
     Denormalize(mean=mean, std=std),
-    Clip(),
-    ToNumpy()    
+    Clip()    
 ])
+
+def to_np_image(x, squeeze=True):
+    x = denormalize(x.detach().cpu())
+    x = ToNumpy()(x)
+    if squeeze and x.ndim == 4 and x.shape[0] == 1:
+        x = np.squeeze(x, 0)
+    return x
+
+def to_pil_image(x):    
+    x = to_np_image(x)
+    x = (x*255).astype(np.uint8)
+    if x.ndim == 3:
+        x = t.ToPILImage()(x)
+    else:
+        x = [t.ToPILImage()(x[i]) for i in range(x.shape[0])]
+    return x    
