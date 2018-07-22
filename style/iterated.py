@@ -6,8 +6,10 @@ import torchvision.models
 import torch.optim as optim
 import torch.optim.lr_scheduler as sched
 import numpy as np
+from tqdm import tqdm
 
 from style.transforms import mean, std, normalize, denormalize
+from style.priors import tv_prior
 
 class IteratedStyleTransfer:
     def __init__(self, dev=None, avgpool=True):
@@ -27,11 +29,18 @@ class IteratedStyleTransfer:
         self.conv_ids = np.array(conv_ids)
         
         self.net = net.eval().to(dev)
-        self.dev = dev
+        self.dev = dev        
 
-    def iterate(self, p, a, cid, sids, niter=200, lr=1e-2, wc=1, ws=1e3, x=None):
-        from tqdm import tqdm
-    
+    def iterate(self, 
+            p, a, cid, sids, 
+            x=None,
+            weight_content_loss=1e-3,
+            weight_style_loss=1e4,
+            weight_tv_loss=1e-2,
+            tv_beta=1,
+            niter=200, 
+            lr=1e-2):
+        
         p = normalize(p).to(self.dev).unsqueeze(0)
         a = normalize(a).to(self.dev).unsqueeze(0)    
 
@@ -42,7 +51,7 @@ class IteratedStyleTransfer:
             x = normalize(x).to(self.dev).unsqueeze(0).requires_grad_()
         
         opt = optim.Adam([x], lr=lr)
-        scheduler = sched.ReduceLROnPlateau(opt, 'min', threshold=1e-3, patience=20, cooldown=50, min_lr=1e-3)
+        scheduler = sched.ReduceLROnPlateau(opt, 'min', threshold=1e-2, patience=20, cooldown=50, min_lr=1e-4)
 
         last_layer = max(cid, sids[-1]) + 1
         net = self.net[:last_layer]
@@ -58,25 +67,28 @@ class IteratedStyleTransfer:
             with tqdm(total=niter) as t: 
                 for idx in range(niter):                  
                    
-                    opt.zero_grad()
-                    x.data[:,0].clamp_(xmin[0], xmax[0])
-                    x.data[:,1].clamp_(xmin[1], xmax[1])
-                    x.data[:,2].clamp_(xmin[2], xmax[2])
+                    opt.zero_grad()                   
 
                     net(x)
-                    closs = cl() * wc
-                    sloss = sl() * ws
-                    loss = closs + sloss
+                    closs = cl() * weight_content_loss
+                    sloss = sl() * weight_style_loss
+                    tvloss = tv_prior(x, tv_beta) * weight_tv_loss
+                    loss = closs + sloss + tvloss
                     loss.backward()
 
                     opt.step()
                     
-                    losses = np.array((closs.item(), sloss.item(), loss.item()))               
+                    losses = np.array((loss.item(), closs.item(), sloss.item()))               
                     t.set_postfix(loss=np.array_str(losses, precision=3), lr=self._max_lr(opt))
                     t.update()
                     
                     scheduler.step(loss)
-                    
+
+                    # Projected gradient descent
+                    x.data[:,0].clamp_(xmin[0], xmax[0])
+                    x.data[:,1].clamp_(xmin[1], xmax[1])
+                    x.data[:,2].clamp_(xmin[2], xmax[2]) 
+
                     if idx % 50 == 0:
                         yield x
         yield x
@@ -89,9 +101,6 @@ class IteratedStyleTransfer:
 
     def _max_lr(self, opt):
         return max([g['lr'] for g in opt.param_groups])    
-
-
-    
 
 class ContentLoss:
     
