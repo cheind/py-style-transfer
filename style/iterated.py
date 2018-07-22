@@ -36,9 +36,10 @@ class IteratedStyleTransfer:
             x=None,
             weight_content_loss=1e-3,
             weight_style_loss=1e4,
-            weight_tv_loss=1e-2,
+            weight_tv_loss=1e-3,
             tv_beta=1,
-            niter=200, 
+            niter=200,
+            yield_freq=50,
             lr=1e-2):
         
         p = normalize(p).to(self.dev).unsqueeze(0)
@@ -46,12 +47,13 @@ class IteratedStyleTransfer:
 
         # Larger noise leads to more diverse images, but convergence is slower.
         if x is None:
-            x = torch.tensor(torch.randn_like(p)*5e-2, requires_grad=True).to(self.dev)
+            data = a.mean(2, keepdim=True).mean(3, keepdim=True) + torch.randn_like(p)*1e-1
+            x = torch.tensor(data, requires_grad=True).to(self.dev)
         else:
             x = normalize(x).to(self.dev).unsqueeze(0).requires_grad_()
         
         opt = optim.Adam([x], lr=lr)
-        scheduler = sched.ReduceLROnPlateau(opt, 'min', threshold=1e-2, patience=20, cooldown=50, min_lr=1e-4)
+        scheduler = sched.ReduceLROnPlateau(opt, 'min', threshold=1e-3, patience=20, cooldown=50, min_lr=1e-4)
 
         last_layer = max(cid, sids[-1]) + 1
         net = self.net[:last_layer]
@@ -78,7 +80,7 @@ class IteratedStyleTransfer:
 
                     opt.step()
                     
-                    losses = np.array((loss.item(), closs.item(), sloss.item()))               
+                    losses = np.array((loss.item(), closs.item(), sloss.item(), tvloss.item()))               
                     t.set_postfix(loss=np.array_str(losses, precision=3), lr=self._max_lr(opt))
                     t.update()
                     
@@ -89,9 +91,9 @@ class IteratedStyleTransfer:
                     x.data[:,1].clamp_(xmin[1], xmax[1])
                     x.data[:,2].clamp_(xmin[2], xmax[2]) 
 
-                    if idx % 50 == 0:
-                        yield x
-        yield x
+                    if idx % yield_freq == 0:
+                        yield x, losses
+        yield x, losses
 
     def run(self, *args, **kwargs):
         g = self.iterate(*args, **kwargs)
