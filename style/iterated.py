@@ -32,33 +32,41 @@ class IteratedStyleTransfer:
         self.dev = dev        
 
     def iterate(self, 
-            p, a, cid, sids, 
+            p, a, content_layer_id, style_layer_weights, 
             x=None,
-            weight_content_loss=1e-3,
-            weight_style_loss=1e4,
-            weight_tv_loss=1e-3,
+            weight_content_loss=1e-2,
+            weight_style_loss=1e1,
+            weight_tv_loss=5e-3,
             tv_beta=1,
             niter=200,
             yield_freq=50,
             lr=1e-2):
+
+        assert len(style_layer_weights) == len(self.conv_ids), 'Need exactly one weight per Conv layer'
         
         p = normalize(p).to(self.dev).unsqueeze(0)
         a = normalize(a).to(self.dev).unsqueeze(0)    
 
         # Larger noise leads to more diverse images, but convergence is slower.
         if x is None:
-            data = a.mean(2, keepdim=True).mean(3, keepdim=True) + torch.randn_like(p)*1e-1
-            x = torch.tensor(data, requires_grad=True).to(self.dev)
+            data = a.mean(2, keepdim=True).mean(3, keepdim=True) + torch.randn_like(p)*5e-2
+            #x = torch.tensor(torch.randn_like(p)*5e-2, requires_grad=True).to(self.dev)            
+            x = torch.tensor(data, requires_grad=True).to(self.dev)            
         else:
             x = normalize(x).to(self.dev).unsqueeze(0).requires_grad_()
+
+        style_layer_weights = np.asarray(style_layer_weights)
+        style_layer_weights = style_layer_weights / style_layer_weights.sum() 
+        style_layer_ids = np.where(style_layer_weights != 0)[0]
+        style_layer_weights = style_layer_weights[style_layer_ids]
         
+        last_layer = max(content_layer_id, style_layer_ids[-1]) + 1
+        net = self.net[:last_layer]
+
         opt = optim.Adam([x], lr=lr)
         scheduler = sched.ReduceLROnPlateau(opt, 'min', threshold=1e-3, patience=20, cooldown=50, min_lr=1e-4)
-
-        last_layer = max(cid, sids[-1]) + 1
-        net = self.net[:last_layer]
         
-        with ContentLoss(net, cid) as cl, StyleLoss(net, sids) as sl:
+        with ContentLoss(net, content_layer_id) as cl, StyleLoss(net, style_layer_ids, style_layer_weights) as sl:
             with torch.no_grad():
                 net(p); cl.init()
                 net(a); sl.init()
@@ -122,7 +130,8 @@ class ContentLoss:
 
     def __call__(self):
         # assumes net(x) called
-        return F.mse_loss(self.act, self.ref)        
+        #return F.mse_loss(self.act, self.ref)        
+        return torch.abs(self.act-self.ref).mean()
         
     def __enter__(self):
         return self
@@ -132,12 +141,11 @@ class ContentLoss:
 
 class StyleLoss:
     
-    def __init__(self, net, layer_ids):
-        self.layer_ids = layer_ids
-        self.layers = [net[l] for l in layer_ids]
+    def __init__(self, net, style_layer_ids, style_layer_weights):
+        self.layers = [net[l] for l in style_layer_ids]
         self.hooks = [l.register_forward_hook(self.hookfn) for l in self.layers]
         self.prehook = net.register_forward_pre_hook(self.prehookfn)
-        self.w = 1 / len(layer_ids)
+        self.w = style_layer_weights.tolist()
         self.act = []
         
     def hookfn(self, n, inp, outp):
@@ -156,8 +164,9 @@ class StyleLoss:
         
     def __call__(self):
         G = [self.gram(x) for x in self.act]
-        E = torch.stack([F.mse_loss(g, a) for g,a in zip(G, self.A)])        
-        return E.mean()
+        #E = torch.cat([F.mse_loss(g, a, reduce=False).view(-1) for g,a in zip(G, self.A)])       
+        E = torch.stack([w * torch.abs(g-a).mean() for g,a,w in zip(G, self.A, self.w)])              
+        return E.sum()
     
     def __enter__(self):
         return self
@@ -167,5 +176,7 @@ class StyleLoss:
         
     def gram(self, x):
         c, n = x.shape[1], x.shape[2]*x.shape[3]
+
         f = x.view(c, n)
+        f = f - f.mean(-1, keepdim=True) 
         return torch.mm(f, f.t()) / (c*n)

@@ -1,6 +1,8 @@
 import torch
 import numpy as np
 import torchvision.transforms as t
+import math
+from PIL import Image
 
 mean = torch.tensor([0.485, 0.456, 0.406])
 std = torch.tensor([0.229, 0.224, 0.225])
@@ -48,3 +50,28 @@ def to_pil_image(x):
     else:
         x = [t.ToPILImage()(x[i]) for i in range(x.shape[0])]
     return x    
+
+
+class ImagePyramid:
+
+    class Scaler:
+        def __init__(self, size, resample):
+            self.size = size
+            self.resample = resample
+        
+        def __call__(self, img):
+            if not isinstance(img, Image.Image):
+                img = to_pil_image(img)
+            return img.resize(self.size, self.resample)
+
+    def __init__(self, finalsize, levels=4, resample=Image.BILINEAR):
+        self.sizes = [self._size_for_level(finalsize, l) for l in range(levels)][::-1]
+        self.resample = resample
+
+    def _size_for_level(self, finalsize, level):
+        s = 2 ** level
+        return (finalsize[0] // s, finalsize[1] // s)
+
+    def iterate(self):
+        for s in self.sizes:
+            yield ImagePyramid.Scaler(s, self.resample)
