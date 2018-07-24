@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+import torch.nn
 import torchvision.transforms as t
 import math
 from PIL import Image
@@ -7,37 +8,22 @@ from PIL import Image
 mean = torch.tensor([0.485, 0.456, 0.406])
 std = torch.tensor([0.229, 0.224, 0.225])
 
-class Denormalize:
-    def __init__(self, mean, std):
-        self.mean = mean
-        self.std = std
-        
-    def __call__(self, tensor):
-        for t, m, s in zip(tensor, self.mean, self.std):
-            t.mul_(s).add_(m)
-        return tensor
-    
-class Clip:
-    def __call__(self, tensor):
-        return torch.clamp(tensor, min=0., max=1.)
-    
-class ToNumpy():
-    def __call__(self, tensor):
-        return np.transpose(tensor.numpy(), (0, 2, 3, 1))
-        
-normalize = t.Compose([
-    t.ToTensor(), # 0..1
-    t.Normalize(mean=mean, std=std)    
-])
 
-denormalize = t.Compose([
-    Denormalize(mean=mean, std=std),
-    Clip()    
-])
+class Normalize(torch.nn.Module):
+    def __init__(self):
+        super(Normalize, self).__init__()
+
+        self.mean = torch.nn.Parameter(mean.view(1,3,1,1))
+        self.std = torch.nn.Parameter(std.view(1,3,1,1))
+
+    def forward(self, x):
+        return (x - self.mean) / self.std
+    
+
+to_tensor = t.ToTensor()
 
 def to_np_image(x, squeeze=True):
-    x = denormalize(x.detach().cpu())
-    x = ToNumpy()(x)
+    x = np.transpose(x.detach().cpu().numpy(), (0, 2, 3, 1))
     if squeeze and x.ndim == 4 and x.shape[0] == 1:
         x = np.squeeze(x, 0)
     return x
@@ -64,13 +50,17 @@ class ImagePyramid:
                 img = to_pil_image(img)
             return img.resize(self.size, self.resample)
 
-    def __init__(self, finalsize, levels=4, resample=Image.BILINEAR):
-        self.sizes = [self._size_for_level(finalsize, l) for l in range(levels)][::-1]
-        self.resample = resample
+    @staticmethod 
+    def get_sizes(finalsize, levels):
+        def size_for_level(finalsize, level):
+            s = 2 ** level
+            return (finalsize[0] // s, finalsize[1] // s)
+        
+        return [size_for_level(finalsize, l) for l in range(levels)][::-1]
 
-    def _size_for_level(self, finalsize, level):
-        s = 2 ** level
-        return (finalsize[0] // s, finalsize[1] // s)
+    def __init__(self, sizes, resample=Image.BILINEAR):
+        self.sizes = sizes
+        self.resample = resample
 
     def iterate(self):
         for s in self.sizes:

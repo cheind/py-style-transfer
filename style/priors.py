@@ -1,16 +1,23 @@
 import torch
+import torch.nn.functional as F
 
-def tv_prior(x, beta):
-    '''Compute the total variation'''
 
-    tl = x[..., :-1, :-1]
-    tr = x[..., :-1,  1:]
-    bl = x[..., 1:,  :-1]
-    
-    tv = ((tl - tr)**2 + (tl - bl)**2)
 
-    # If beta is 1 and tv is zero, than the gradient is inf.
-    tv = tv + 1e-6   
-    tv = tv **(beta*0.5)
+def tv_prior(x):
+    '''Computes the total variation loss'''
 
-    return tv.mean()
+    xdir = x.new_tensor([[-1, 1]]).view(1,1,1,2).repeat(3,1,1,1)
+    ydir = x.new_tensor([[-1],[1]]).view(1,1,2,1).repeat(3,1,1,1)
+
+
+    fx = F.conv2d(x, xdir, padding=0, groups=3)
+    fy = F.conv2d(x, ydir, padding=0, groups=3)
+
+    return (fx.abs().view(fx.shape[0], -1) + fy.abs().view(fx.shape[0], -1)).mean()
+
+
+def tv_prior2(x):
+    kernels = x.new_tensor([[0., 1, 0], [1,-4,1], [0,1,0]], dtype=torch.float32).view(1,1,3,3).repeat(3,1,1,1)
+    f = F.conv2d(x, kernels, padding=1, groups=3)
+    v = f.abs().mean()
+    return v
