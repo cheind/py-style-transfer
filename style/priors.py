@@ -13,7 +13,9 @@ def tv_prior(x):
     fx = F.conv2d(x, xdir, padding=0, groups=3)
     fy = F.conv2d(x, ydir, padding=0, groups=3)
 
-    return (fx.abs().view(fx.shape[0], -1) + fy.abs().view(fx.shape[0], -1)).mean()
+    return torch.cat([
+        fx.abs().view(fx.shape[0], -1), 
+        fy.abs().view(fx.shape[0], -1)]).mean()
 
 
 def tv_prior2(x):
