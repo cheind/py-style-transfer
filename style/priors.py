@@ -14,8 +14,8 @@ def tv_prior(x):
     fy = F.conv2d(x, ydir, padding=0, groups=3)
 
     return torch.cat([
-        fx.abs().view(fx.shape[0], -1), 
-        fy.abs().view(fx.shape[0], -1)]).mean()
+        fx.abs().view(-1), 
+        fy.abs().view(-1)]).mean()
 
 
 def tv_prior2(x):

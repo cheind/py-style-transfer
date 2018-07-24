@@ -39,7 +39,8 @@ class IteratedStyleTransfer:
             weight_tv_loss=5e-5,
             niter=200,
             yield_freq=50,
-            lr=1e-2):
+            lr=1e-2,
+            content_pixel_weights=None):
 
         assert len(style_layer_weights) == len(self.conv_ids), 'Need exactly one weight per Conv layer'
         
@@ -68,7 +69,7 @@ class IteratedStyleTransfer:
         opt = optim.Adam([x], lr=lr)
         scheduler = sched.ReduceLROnPlateau(opt, 'min', threshold=1e-3, patience=20, cooldown=50, min_lr=1e-4)
         
-        with ContentLoss(net[1], content_layer_id) as cl, StyleLoss(net[1], style_layer_ids, style_layer_weights) as sl:
+        with ContentLoss(net[1], content_layer_id, content_pixel_weights) as cl, StyleLoss(net[1], style_layer_ids, style_layer_weights) as sl:
             with torch.no_grad():
                 net(p); cl.init()
                 net(a); sl.init()
@@ -111,13 +112,18 @@ class IteratedStyleTransfer:
 
 class ContentLoss:
     
-    def __init__(self, net, layer_id):
+    def __init__(self, net, layer_id, pixel_weights=None):
         self.layer_id = layer_id
         self.hook = net[layer_id].register_forward_hook(self.hookfn)        
+        self.pixel_weights = pixel_weights
+        self.pooled_weights = None
         
     def init(self):
         # assumes net(p) called
         self.ref = self.act.data.clone()
+        if self.pixel_weights is not None:
+            pooled_weights = F.adaptive_avg_pool2d(self.pixel_weights, (self.ref.shape[2], self.ref.shape[3]))
+            self.pooled_weights = self.ref.new_tensor(pooled_weights)
         
     def hookfn(self, n, inp, outp):
         self.act = outp
@@ -127,7 +133,10 @@ class ContentLoss:
 
     def __call__(self):
         # assumes net(x) called
-        return F.mse_loss(self.act, self.ref)        
+        if self.pooled_weights is None:
+            return F.mse_loss(self.act, self.ref)
+        else:
+            return torch.sum(self.pooled_weights * (self.act - self.ref) ** 2) / (self.pooled_weights.sum()*self.ref.shape[1])
         
     def __enter__(self):
         return self
