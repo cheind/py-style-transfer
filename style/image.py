@@ -32,6 +32,13 @@ def save(fname, x):
 def resize(x, size, resample=Image.BILINEAR):
     return to_np(to_pil(x).resize(size, resample))
 
+def noisy(x, mean=0, std=1e-2):
+    n = np.random.normal(mean, std, size=x.shape).astype(np.float32)*std + mean
+    return np.clip(x+n, 0, 1)
+
+def rotate(x, degree):
+    return to_np(to_pil(x).rotate(degree))
+
 class ImagePyramid:
 
     class Scaler:
