@@ -8,8 +8,18 @@ import torch.optim.lr_scheduler as sched
 import numpy as np
 from tqdm import tqdm
 
-from style.transforms import Normalize, to_tensor
-from style.priors import tv_prior, tv_prior2
+from style.image import vgg_mean, vgg_std, to_torch, to_np, ImagePyramid
+from style.priors import tv_prior
+
+class Normalize(torch.nn.Module):
+    def __init__(self):
+        super(Normalize, self).__init__()
+
+        self.mean = torch.nn.Parameter(vgg_mean.view(1,3,1,1))
+        self.std = torch.nn.Parameter(vgg_std.view(1,3,1,1))
+
+    def forward(self, x):
+        return (x - self.mean) / self.std
 
 class IteratedStyleTransfer:
     def __init__(self, dev=None, avgpool=True):
@@ -40,19 +50,19 @@ class IteratedStyleTransfer:
             niter=200,
             yield_freq=50,
             lr=1e-2,
-            content_pixel_weights=None):
+            disable_progress=False):
 
         assert len(style_layer_weights) == len(self.conv_ids), 'Need exactly one weight per Conv layer'
         
-        p = to_tensor(p).to(self.dev).unsqueeze(0)
-        a = to_tensor(a).to(self.dev).unsqueeze(0)    
+        p = to_torch(p).to(self.dev)
+        a = to_torch(a).to(self.dev)
 
         # Larger noise leads to more diverse images, but convergence is slower.
         if x is None:
-            data = p.view(p.shape[0], p.shape[1], -1).mean(-1).view(-1,3,1,1) + torch.randn_like(p)*1e-2
+            data = p.view(p.shape[0], p.shape[1], -1).mean(-1).view(-1,3,1,1) + torch.randn_like(p)*5e-2
             x = torch.tensor(data, requires_grad=True).to(self.dev)            
         else:
-            x = to_tensor(x).to(self.dev).unsqueeze(0).requires_grad_()
+            x = to_torch(x).to(self.dev).requires_grad_()
 
         style_layer_weights = np.asarray(style_layer_weights)
         style_layer_weights = style_layer_weights / style_layer_weights.sum() 
@@ -69,12 +79,12 @@ class IteratedStyleTransfer:
         opt = optim.Adam([x], lr=lr)
         scheduler = sched.ReduceLROnPlateau(opt, 'min', threshold=1e-3, patience=20, cooldown=50, min_lr=1e-4)
         
-        with ContentLoss(net[1], content_layer_id, content_pixel_weights) as cl, StyleLoss(net[1], style_layer_ids, style_layer_weights) as sl:
+        with ContentLoss(net[1], content_layer_id) as cl, StyleLoss(net[1], style_layer_ids, style_layer_weights) as sl:
             with torch.no_grad():
                 net(p); cl.init()
                 net(a); sl.init()
 
-            with tqdm(total=niter) as t: 
+            with tqdm(total=niter, disable=disable_progress) as t: 
                 for idx in range(niter):                  
                    
                     opt.zero_grad()                   
@@ -98,11 +108,36 @@ class IteratedStyleTransfer:
                     x.data.clamp_(0, 1)
 
                     if idx % yield_freq == 0:
-                        yield x, losses
-        yield x, losses
+                        yield to_np(x), losses
+
+        yield to_np(x), losses
 
     def run(self, *args, **kwargs):
         g = self.iterate(*args, **kwargs)
+        for x in g:
+            pass
+        return x
+
+    def iterate_multiscale(self, p, a, content_layer_id, style_layer_weights, sizes, x=None, scale_style=True, **kwargs):
+
+        pyr = ImagePyramid(sizes)
+        with tqdm(total=len(sizes)) as t: 
+            for scaler in pyr.iterate():
+                if x is not None:
+                    x = scaler(x)
+
+                pscaled = scaler(p)
+                ascaled = scaler(a) if scale_style else a
+
+                x, losses = self.run(pscaled, ascaled, content_layer_id, style_layer_weights, x=x, disable_progress=True, **kwargs)    
+
+                t.set_postfix(loss=np.array_str(losses, precision=3))
+                t.update()
+
+                yield x, losses
+
+    def run_multiscale(self, *args, **kwargs):
+        g = self.iterate_multiscale(*args, **kwargs)
         for x in g:
             pass
         return x
@@ -112,18 +147,13 @@ class IteratedStyleTransfer:
 
 class ContentLoss:
     
-    def __init__(self, net, layer_id, pixel_weights=None):
+    def __init__(self, net, layer_id):
         self.layer_id = layer_id
         self.hook = net[layer_id].register_forward_hook(self.hookfn)        
-        self.pixel_weights = pixel_weights
-        self.pooled_weights = None
         
     def init(self):
         # assumes net(p) called
         self.ref = self.act.data.clone()
-        if self.pixel_weights is not None:
-            pooled_weights = F.adaptive_avg_pool2d(self.pixel_weights, (self.ref.shape[2], self.ref.shape[3]))
-            self.pooled_weights = self.ref.new_tensor(pooled_weights)
         
     def hookfn(self, n, inp, outp):
         self.act = outp
@@ -133,10 +163,7 @@ class ContentLoss:
 
     def __call__(self):
         # assumes net(x) called
-        if self.pooled_weights is None:
-            return F.mse_loss(self.act, self.ref)
-        else:
-            return torch.sum(self.pooled_weights * (self.act - self.ref) ** 2) / (self.pooled_weights.sum()*self.ref.shape[1])
+        return F.mse_loss(self.act, self.ref)
         
     def __enter__(self):
         return self
