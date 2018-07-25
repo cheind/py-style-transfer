@@ -59,7 +59,7 @@ class IteratedStyleTransfer:
 
         # Larger noise leads to more diverse images, but convergence is slower.
         if x is None:
-            data = p.view(p.shape[0], p.shape[1], -1).mean(-1).view(-1,3,1,1) + torch.randn_like(p)*5e-2
+            data = p.view(p.shape[0], p.shape[1], -1).mean(-1).view(-1,3,1,1) + torch.randn_like(p)*1e-2
             x = torch.tensor(data, requires_grad=True).to(self.dev)            
         else:
             x = to_torch(x).to(self.dev).requires_grad_()
