@@ -1,7 +1,12 @@
 import torch
 import numpy as np
+import math
 import torchvision.transforms as t
+from collections import namedtuple
 from PIL import Image
+
+vgg_mean = torch.tensor([0.485, 0.456, 0.406])
+vgg_std = torch.tensor([0.229, 0.224, 0.225])
 
 def to_torch(x):
     return t.ToTensor()(x).unsqueeze(0)
@@ -39,7 +44,18 @@ def noisy(x, mean=0, std=1e-2):
 def rotate(x, degree):
     return to_np(to_pil(x).rotate(degree))
 
-class ImagePyramid:
+
+def borderless_view(x, border):    
+    b = border
+    if b > 0:
+        if isinstance(x, torch.Tensor):
+            return x[...,b:-b, b:-b]
+        else:
+            return x[b:-b, b:-b]
+    else:
+        return x
+
+class Pyramid:
 
     class Scaler:
         def __init__(self, size, resample):
@@ -50,12 +66,23 @@ class ImagePyramid:
             return resize(img, self.size, self.resample)
 
     @staticmethod 
-    def get_sizes(finalsize, levels):
-        def size_for_level(finalsize, level):
+    def image_sizes(finalshape, levels):
+        finalsize = finalshape[:2][::-1]
+        
+        def size_for_level(level):
             s = 2 ** level
             return (finalsize[0] // s, finalsize[1] // s)
         
-        return [size_for_level(finalsize, l) for l in range(levels)][::-1]
+        return [size_for_level(l) for l in range(levels)][::-1]
+
+    @staticmethod
+    def scaled_border_sizes(sizes, border):
+        if border > 0:
+            mins = [min(s) for s in sizes]
+            f = mins[-1] / border
+            return [int(max(math.ceil(s/f),0)) for s in mins]
+        else:
+            return [0]*len(sizes)
 
     def __init__(self, sizes, resample=Image.BILINEAR):
         self.sizes = sizes
@@ -63,8 +90,26 @@ class ImagePyramid:
 
     def iterate(self):
         for s in self.sizes:
-            yield ImagePyramid.Scaler(s, self.resample)
+            yield Pyramid.Scaler(s, self.resample)
 
 
-vgg_mean = torch.tensor([0.485, 0.456, 0.406])
-vgg_std = torch.tensor([0.229, 0.224, 0.225])
+
+Border = namedtuple('Border', 'tl t tr r br b bl l ft fr fb fl')
+
+def border_elements(x, b):
+    h, w = x.shape[-2:]
+    
+    return Border(
+        tl=x[...,:b, :b],
+        t=x[...,:b, b:-b],
+        tr=x[...,:b, -b:],
+        r=x[...,b:-b, -b:],
+        br=x[...,-b:, -b:],
+        b=x[...,-b:, b:-b],
+        bl=x[...,-b:, :b],
+        l=x[...,b:-b, :b],
+        ft=x[...,:b, :],
+        fr=x[...,-b:],
+        fb=x[...,-b:, :],
+        fl=x[...,:b],
+    )

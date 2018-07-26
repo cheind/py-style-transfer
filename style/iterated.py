@@ -8,15 +8,16 @@ import torch.optim.lr_scheduler as sched
 import numpy as np
 from tqdm import tqdm
 
-from style.image import vgg_mean, vgg_std, to_torch, to_np, ImagePyramid
-from style.priors import tv_prior
+import style.image as image
+import style.priors as priors
+from style.seamless import SeamlessTexture
 
 class Normalize(torch.nn.Module):
     def __init__(self):
         super(Normalize, self).__init__()
 
-        self.mean = torch.nn.Parameter(vgg_mean.view(1,3,1,1))
-        self.std = torch.nn.Parameter(vgg_std.view(1,3,1,1))
+        self.mean = torch.nn.Parameter(image.vgg_mean.view(1,3,1,1))
+        self.std = torch.nn.Parameter(image.vgg_std.view(1,3,1,1))
 
     def forward(self, x):
         return (x - self.mean) / self.std
@@ -39,7 +40,45 @@ class IteratedStyleTransfer:
         self.conv_ids = np.array(conv_ids)
         
         self.vgg = vgg.eval()
-        self.dev = dev        
+        self.dev = dev 
+
+
+    def _create_image_tensors(self, p, a, x, border=0):
+        p = image.to_np(p)
+        a = image.to_np(a)        
+
+        if x is None:
+            x = p.mean((0,1), keepdims=True)
+            x = x + np.random.randn(*p.shape).astype(np.float32)*1e-2
+        else:
+            x = image.to_np(x)
+
+        p = image.to_torch(p).to(self.dev)
+        a = image.to_torch(a).to(self.dev)
+        x = image.to_torch(x).to(self.dev).requires_grad_()    
+
+        return p, a, x    
+
+    def _sparse_layer_weights(self, layer_weights, normalize=True):
+        layer_weights = np.asarray(layer_weights)
+        if normalize:
+            layer_weights = layer_weights / layer_weights.sum() 
+
+        layer_ids = np.where(layer_weights != 0)[0]
+        layer_weights = layer_weights[layer_ids]
+
+        return layer_ids, layer_weights
+
+    def _create_network(self, content_layer_id, style_layer_ids):
+        last_layer = max(content_layer_id, style_layer_ids[-1]) + 1
+        
+        net = nn.Sequential(
+            Normalize(),
+            self.vgg
+        ).to(self.dev)
+
+        return net
+
 
     def iterate(self, 
             p, a, content_layer_id, style_layer_weights, 
@@ -50,39 +89,27 @@ class IteratedStyleTransfer:
             niter=200,
             yield_freq=50,
             lr=1e-2,
-            disable_progress=False):
+            disable_progress=False,
+            seamless_border=0):
 
         assert len(style_layer_weights) == len(self.conv_ids), 'Need exactly one weight per Conv layer'
+
+        p, a, x = self._create_image_tensors(p, a, x, seamless_border)
+
+        style_layer_ids, style_layer_weights = self._sparse_layer_weights(style_layer_weights)
+
+        net = self._create_network(content_layer_id, style_layer_ids)
         
-        p = to_torch(p).to(self.dev)
-        a = to_torch(a).to(self.dev)
-
-        # Larger noise leads to more diverse images, but convergence is slower.
-        if x is None:
-            data = p.view(p.shape[0], p.shape[1], -1).mean(-1).view(-1,3,1,1) + torch.randn_like(p)*1e-2
-            x = torch.tensor(data, requires_grad=True).to(self.dev)            
-        else:
-            x = to_torch(x).to(self.dev).requires_grad_()
-
-        style_layer_weights = np.asarray(style_layer_weights)
-        style_layer_weights = style_layer_weights / style_layer_weights.sum() 
-        style_layer_ids = np.where(style_layer_weights != 0)[0]
-        style_layer_weights = style_layer_weights[style_layer_ids]
-        
-        last_layer = max(content_layer_id, style_layer_ids[-1]) + 1
-
-        net = nn.Sequential(
-            Normalize(),
-            self.vgg
-        ).to(self.dev)
-
         opt = optim.Adam([x], lr=lr)
         scheduler = sched.ReduceLROnPlateau(opt, 'min', threshold=1e-3, patience=20, cooldown=50, min_lr=1e-4)
+        seamless = SeamlessTexture(x, seamless_border)
         
         with ContentLoss(net[1], content_layer_id) as cl, StyleLoss(net[1], style_layer_ids, style_layer_weights) as sl:
             with torch.no_grad():
                 net(p); cl.init()
                 net(a); sl.init()
+
+            seamless.copy_content_to_border()
 
             with tqdm(total=niter, disable=disable_progress) as t: 
                 for idx in range(niter):                  
@@ -92,11 +119,15 @@ class IteratedStyleTransfer:
                     net(x)
                     closs = cl() * weight_content_loss
                     sloss = sl() * weight_style_loss
-                    tvloss = tv_prior(x) * weight_tv_loss
+                    tvloss = priors.tv_prior(x) * weight_tv_loss
                     loss = closs + sloss + tvloss
                     loss.backward()
 
+                    seamless.zero_border_grads()
+                    
                     opt.step()
+
+                    seamless.copy_content_to_border()
                     
                     losses = np.array((loss.item(), closs.item(), sloss.item(), tvloss.item()))               
                     t.set_postfix(loss=np.array_str(losses, precision=3), lr=self._max_lr(opt))
@@ -108,9 +139,9 @@ class IteratedStyleTransfer:
                     x.data.clamp_(0, 1)
 
                     if idx % yield_freq == 0:
-                        yield to_np(x), losses
+                        yield image.to_np(x), losses
 
-        yield to_np(x), losses
+        yield image.to_np(x), losses
 
     def run(self, *args, **kwargs):
         g = self.iterate(*args, **kwargs)
@@ -118,18 +149,21 @@ class IteratedStyleTransfer:
             pass
         return x
 
-    def iterate_multiscale(self, p, a, content_layer_id, style_layer_weights, sizes, x=None, scale_style=True, **kwargs):
+    def iterate_multiscale(self, p, a, content_layer_id, style_layer_weights, sizes, x=None, scale_style=True, seamless_border=0, **kwargs):
 
-        pyr = ImagePyramid(sizes)
+        pyr = image.Pyramid(sizes)
+        borders = image.Pyramid.scaled_border_sizes(sizes, seamless_border) 
+
         with tqdm(total=len(sizes)) as t: 
-            for scaler in pyr.iterate():
+            for b, scaler in zip(borders, pyr.iterate()):
+
                 if x is not None:
                     x = scaler(x)
 
                 pscaled = scaler(p)
                 ascaled = scaler(a) if scale_style else a
 
-                x, losses = self.run(pscaled, ascaled, content_layer_id, style_layer_weights, x=x, disable_progress=True, **kwargs)    
+                x, losses = self.run(pscaled, ascaled, content_layer_id, style_layer_weights, x=x, disable_progress=True, seamless_border=b, **kwargs)    
 
                 t.set_postfix(loss=np.array_str(losses, precision=3))
                 t.update()
