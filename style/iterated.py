@@ -121,6 +121,10 @@ class IteratedStyleTransfer:
                     sloss = sl() * weight_style_loss
                     tvloss = priors.tv_prior(x) * weight_tv_loss
                     loss = closs + sloss + tvloss
+
+                    for plugin in plugins: 
+                        loss = plugin.after_loss(x, loss)
+
                     loss.backward()
 
                     [plugin.after_backward(x) for plugin in plugins]
