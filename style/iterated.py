@@ -10,7 +10,6 @@ from tqdm import tqdm
 
 import style.image as image
 import style.priors as priors
-from style.seamless import SeamlessTexture
 
 class Normalize(torch.nn.Module):
     def __init__(self):
@@ -43,7 +42,7 @@ class IteratedStyleTransfer:
         self.dev = dev 
 
 
-    def _create_image_tensors(self, p, a, x, border=0):
+    def _create_image_tensors(self, p, a, x):
         p = image.to_np(p)
         a = image.to_np(a)        
 
@@ -90,11 +89,13 @@ class IteratedStyleTransfer:
             yield_freq=50,
             lr=1e-2,
             disable_progress=False,
-            seamless_border=0):
+            plugins=None):
 
         assert len(style_layer_weights) == len(self.conv_ids), 'Need exactly one weight per Conv layer'
 
-        p, a, x = self._create_image_tensors(p, a, x, seamless_border)
+        plugins = plugins or []
+
+        p, a, x = self._create_image_tensors(p, a, x)
 
         style_layer_ids, style_layer_weights = self._sparse_layer_weights(style_layer_weights)
 
@@ -102,14 +103,13 @@ class IteratedStyleTransfer:
         
         opt = optim.Adam([x], lr=lr)
         scheduler = sched.ReduceLROnPlateau(opt, 'min', threshold=1e-3, patience=20, cooldown=50, min_lr=1e-4)
-        seamless = SeamlessTexture(x, seamless_border)
         
         with ContentLoss(net[1], content_layer_id) as cl, StyleLoss(net[1], style_layer_ids, style_layer_weights) as sl:
             with torch.no_grad():
                 net(p); cl.init()
                 net(a); sl.init()
 
-            seamless.copy_content_to_border()
+            [plugin.prepare(p,a,x) for plugin in plugins]
 
             with tqdm(total=niter, disable=disable_progress) as t: 
                 for idx in range(niter):                  
@@ -123,11 +123,11 @@ class IteratedStyleTransfer:
                     loss = closs + sloss + tvloss
                     loss.backward()
 
-                    seamless.zero_border_grads()
-                    
-                    opt.step()
+                    [plugin.after_backward(x) for plugin in plugins]
 
-                    seamless.copy_content_to_border()
+                    opt.step()
+                    
+                    [plugin.after_step(x) for plugin in plugins]
                     
                     losses = np.array((loss.item(), closs.item(), sloss.item(), tvloss.item()))               
                     t.set_postfix(loss=np.array_str(losses, precision=3), lr=self._max_lr(opt))
@@ -149,13 +149,12 @@ class IteratedStyleTransfer:
             pass
         return x
 
-    def iterate_multiscale(self, p, a, content_layer_id, style_layer_weights, sizes, x=None, scale_style=True, seamless_border=0, **kwargs):
+    def iterate_multiscale(self, p, a, content_layer_id, style_layer_weights, sizes, x=None, scale_style=True, **kwargs):
 
         pyr = image.Pyramid(sizes)
-        borders = image.Pyramid.scaled_border_sizes(sizes, seamless_border) 
-
+        
         with tqdm(total=len(sizes)) as t: 
-            for b, scaler in zip(borders, pyr.iterate()):
+            for scaler in pyr.iterate():
 
                 if x is not None:
                     x = scaler(x)
@@ -163,7 +162,7 @@ class IteratedStyleTransfer:
                 pscaled = scaler(p)
                 ascaled = scaler(a) if scale_style else a
 
-                x, losses = self.run(pscaled, ascaled, content_layer_id, style_layer_weights, x=x, disable_progress=True, seamless_border=b, **kwargs)    
+                x, losses = self.run(pscaled, ascaled, content_layer_id, style_layer_weights, x=x, disable_progress=True, **kwargs)    
 
                 t.set_postfix(loss=np.array_str(losses, precision=3))
                 t.update()

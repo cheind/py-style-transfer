@@ -96,7 +96,7 @@ class Pyramid:
 
 Border = namedtuple('Border', 'tl t tr r br b bl l ft fr fb fl')
 
-def border_elements(x, b):
+def border_elements(x, b):    
     h, w = x.shape[-2:]
     
     return Border(
