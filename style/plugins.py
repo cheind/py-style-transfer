@@ -65,50 +65,7 @@ class FadeInPlugin(Plugin):
         self._mask = x.new_tensor(image.to_torch(self._mask))
         self._content = x.new_tensor(image.to_torch(self._content))
         
-        self._iter = 0
-        
-        #self._s = 0.001
-        #n = kwargs['niter']
-        #self._k = -np.log(self._s)/n
-        self._k = 1 / kwargs['niter']
-
     def after_backward(self, x):
-        self._iter += 1
-        #f = min(self._k * self._iter, 0.2)
-        f=0.25
-        #f = self._s*np.exp(self._k*self._iter)
-
+        f=0.1
         mix = x.data * (1 - f) + self._content * f
         x.data.copy_(x.data * (1 - self._mask) + mix * (self._mask))
-
-
-
-class ReconstructPlugin(Plugin):
-
-    def __init__(self, mask, max_alpha):   
-        self.mask = mask
-        self.max_alpha = max_alpha
-
-    def prepare(self, p, a, x, **kwargs):        
-        target_size = (x.shape[-1], x.shape[-2])
-        source_size = self.mask.shape[:2][::-1]
-
-        if target_size != source_size:
-            self._mask = image.resize(self.mask, (x.shape[-1], x.shape[-2]), resample=Image.NEAREST)
-        else:
-            self._mask = self.mask      
-
-        self._mask = x.new_tensor(image.to_torch(self._mask))
-        
-        self._p = p.detach()
-        self._iter = 0
-        self._k = math.log(self.max_alpha) / kwargs['niter']
-
-    def after_loss(self, x, loss):
-        err = (self._mask * (self._p - x))**2
-        err = err.sum() / self._mask.sum()        
-        loss = loss +  err * math.exp(self._k*self._iter)
-
-        self._iter += 1
-
-        return loss
