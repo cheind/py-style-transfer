@@ -49,7 +49,7 @@ class IteratedStyleTransfer:
         if x is None:
             x = p.mean((0,1), keepdims=True)
             x = x + np.random.randn(*p.shape).astype(np.float32)*1e-2
-        else:
+        else:           
             x = image.to_np(x)
 
         p = image.to_torch(p).to(self.dev)
@@ -94,7 +94,7 @@ class IteratedStyleTransfer:
         assert len(style_layer_weights) == len(self.conv_ids), 'Need exactly one weight per Conv layer'
 
         plugins = plugins or []
-
+        
         p, a, x = self._create_image_tensors(p, a, x)
 
         style_layer_ids, style_layer_weights = self._sparse_layer_weights(style_layer_weights)
@@ -109,7 +109,7 @@ class IteratedStyleTransfer:
                 net(p); cl.init()
                 net(a); sl.init()
 
-            [plugin.prepare(p,a,x) for plugin in plugins]
+            [plugin.prepare(p,a,x,niter=niter) for plugin in plugins]
 
             with tqdm(total=niter, disable=disable_progress) as t: 
                 for idx in range(niter):                  
@@ -225,8 +225,8 @@ class StyleLoss:
 
     def init(self):
         # assumes net(a) called        
-        self.A = [self.gram(x).data.clone() for x in self.act]        
-        
+        self.A = [self.gram(x).data.clone() for x in self.act]
+
     def remove(self):
         self.prehook.remove()
         [h.remove() for h in self.hooks]

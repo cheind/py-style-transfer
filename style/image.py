@@ -14,8 +14,13 @@ def to_torch(x):
 def to_np(x):
     if isinstance(x, Image.Image):
         x = np.array(x, dtype=np.float32) / 255.0
+        if x.ndim == 2:
+            x = np.expand_dims(x, -1)
     elif isinstance(x, torch.Tensor):
-        x = np.transpose(x.detach().cpu().squeeze().numpy(), (1,2,0))
+        x = x.detach().cpu().squeeze().numpy()
+        if x.ndim == 2:
+            x = np.expand_dims(x, 0)
+        x = np.transpose(x, (1,2,0))
     else:
         x = np.asarray(x)
     return x
@@ -34,7 +39,10 @@ def open(fname):
 def save(fname, x):
     to_pil(x).save(fname)
 
-def resize(x, size, resample=Image.BILINEAR):
+BILINEAR = Image.BILINEAR
+NEAREST = Image.NEAREST
+
+def resize(x, size, resample=BILINEAR):
     return to_np(to_pil(x).resize(size, resample))
 
 def noisy(x, mean=0, std=1e-2):
@@ -97,19 +105,39 @@ class Pyramid:
 Border = namedtuple('Border', 'tl t tr r br b bl l ft fr fb fl')
 
 def border_elements(x, b):    
-    h, w = x.shape[-2:]
-    
-    return Border(
-        tl=x[...,:b, :b],
-        t=x[...,:b, b:-b],
-        tr=x[...,:b, -b:],
-        r=x[...,b:-b, -b:],
-        br=x[...,-b:, -b:],
-        b=x[...,-b:, b:-b],
-        bl=x[...,-b:, :b],
-        l=x[...,b:-b, :b],
-        ft=x[...,:b, :],
-        fr=x[...,-b:],
-        fb=x[...,-b:, :],
-        fl=x[...,:b],
-    )
+
+    if isinstance(x, torch.Tensor):
+        h, w = x.shape[-2:]
+        
+        return Border(
+            tl=x[...,:b, :b],
+            t=x[...,:b, b:-b],
+            tr=x[...,:b, -b:],
+            r=x[...,b:-b, -b:],
+            br=x[...,-b:, -b:],
+            b=x[...,-b:, b:-b],
+            bl=x[...,-b:, :b],
+            l=x[...,b:-b, :b],
+            ft=x[...,:b, :],
+            fr=x[...,-b:],
+            fb=x[...,-b:, :],
+            fl=x[...,:b],
+        )
+    else:
+        # assume numpy
+        h, w = x.shape[:2]
+        
+        return Border(
+            tl=x[:b, :b],
+            t=x[:b, b:-b],
+            tr=x[:b, -b:],
+            r=x[b:-b, -b:],
+            br=x[-b:, -b:],
+            b=x[-b:, b:-b],
+            bl=x[-b:, :b],
+            l=x[b:-b, :b],
+            ft=x[:b, :],
+            fr=x[:,-b:],
+            fb=x[-b:, :],
+            fl=x[:,:b],
+        )
