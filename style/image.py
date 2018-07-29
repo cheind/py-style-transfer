@@ -43,6 +43,9 @@ BILINEAR = Image.BILINEAR
 NEAREST = Image.NEAREST
 
 def resize(x, size, resample=BILINEAR):
+    if isinstance(x, (np.ndarray, np.generic)):
+        if x.shape[:2][::-1] == size:
+            return x
     return to_np(to_pil(x).resize(size, resample))
 
 def noisy(x, mean=0, std=1e-2):
