@@ -28,12 +28,11 @@ class IteratedStyleTransfer:
         
         vgg = torchvision.models.vgg19(pretrained=True).features[:-1]
         if avgpool:
-            layers = [nn.AvgPool2d(2) if isinstance(n, nn.MaxPool2d) else n for n in vgg.children()]
-            net = nn.Sequential(*layers)
+            layers = [nn.AvgPool2d(2) if isinstance(n, nn.MaxPool2d) else n for n in vgg.children()]            
+            vgg = nn.Sequential(*layers)
         
-        for param in net.parameters():
+        for param in vgg.parameters():
             param.requires_grad = False
-
 
         conv_ids = [idx for idx, m in enumerate(vgg.children()) if isinstance(m, nn.Conv2d)]
         self.conv_ids = np.array(conv_ids)
@@ -73,7 +72,7 @@ class IteratedStyleTransfer:
         
         net = nn.Sequential(
             Normalize(),
-            self.vgg
+            self.vgg[:last_layer]
         ).to(self.dev)
 
         return net
