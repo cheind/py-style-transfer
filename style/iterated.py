@@ -103,6 +103,7 @@ class IteratedStyleTransfer:
         opt = optim.Adam([x], lr=lr)
         scheduler = sched.ReduceLROnPlateau(opt, 'min', threshold=1e-3, patience=20, cooldown=50, min_lr=1e-4)
         
+        
         with ContentLoss(net[1], content_layer_id) as cl, StyleLoss(net[1], style_layer_ids, style_layer_weights) as sl:
             with torch.no_grad():
                 net(p); cl.init()
@@ -110,6 +111,7 @@ class IteratedStyleTransfer:
 
             [plugin.prepare(p,a,x,niter=niter) for plugin in plugins]
 
+            losses = None
             with tqdm(total=niter, disable=disable_progress) as t: 
                 for idx in range(niter):                  
                    
