@@ -56,7 +56,7 @@ class GridSynthesis:
         w = np.linspace(0, np.pi, self.b)
         w = (1 + np.cos(w)) / 2
         
-        ctx = np.zeros(self.tile_shape)
+        ctx = np.zeros(self.tile_shape, np.float32)
         
         if col > 0:
             bmask = getb(geti(left_mask, self.s), self.b)

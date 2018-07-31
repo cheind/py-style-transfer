@@ -65,7 +65,7 @@ class FadeInPlugin(Plugin):
         self._mask = x.new_tensor(image.to_torch(self._mask))
         self._content = x.new_tensor(image.to_torch(self._content))
         
-    def after_backward(self, x):
+    def after_step(self, x):
         f=0.1
         mix = x.data * (1 - f) + self._content * f
         x.data.copy_(x.data * (1 - self._mask) + mix * (self._mask))
