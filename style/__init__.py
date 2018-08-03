@@ -1,6 +1,6 @@
 
 from style.iterated import IteratedStyleTransfer
-from style.grid import GridSynthesis
+from style.tile import TiledGeneration
 import style.image
 import style.plugins
 
