@@ -41,9 +41,13 @@ class IteratedStyleTransfer:
         self.dev = dev 
 
 
-    def _create_image_tensors(self, p, a, x):
+    def _create_image_tensors(self, p, a, x):        
+                
+        if p is None:
+            p = a
+
         p = image.to_np(p)
-        a = image.to_np(a)        
+        a = image.to_np(a)
 
         if x is None:
             x = p.mean((0,1), keepdims=True)
@@ -79,32 +83,32 @@ class IteratedStyleTransfer:
 
 
     def iterate(self, 
-            p, a, content_layer_id, style_layer_weights, 
-            x=None,
-            weight_content_loss=1e-3,
-            weight_style_loss=1e4,
-            weight_tv_loss=5e-5,
-            niter=200,
-            yield_freq=50,
+            content=None,
+            style=None,
+            seed=None,
+            content_id=8,
+            style_weights=None,
+            lambda_content=1e-3,
+            lambda_style=1e4,
+            lambda_tv=5e-5,            
             lr=1e-2,
+            niter=200,
+            yield_every=50,
             disable_progress=False,
             plugins=None):
 
-        assert len(style_layer_weights) == len(self.conv_ids), 'Need exactly one weight per Conv layer'
+        assert len(style_weights) == len(self.conv_ids), 'Need exactly one weight per Conv layer'
 
         plugins = plugins or []
         
-        p, a, x = self._create_image_tensors(p, a, x)
-
-        style_layer_ids, style_layer_weights = self._sparse_layer_weights(style_layer_weights)
-
-        net = self._create_network(content_layer_id, style_layer_ids)
+        p, a, x = self._create_image_tensors(content, style, seed)
+        style_ids, style_weights = self._sparse_layer_weights(style_weights)
+        net = self._create_network(content_id, style_ids)
         
         opt = optim.Adam([x], lr=lr)
         scheduler = sched.ReduceLROnPlateau(opt, 'min', threshold=1e-3, patience=20, cooldown=50, min_lr=1e-4)
         
-        
-        with ContentLoss(net[1], content_layer_id) as cl, StyleLoss(net[1], style_layer_ids, style_layer_weights) as sl:
+        with ContentLoss(net[1], content_id) as cl, StyleLoss(net[1], style_ids, style_weights) as sl:
             with torch.no_grad():
                 net(p); cl.init()
                 net(a); sl.init()
@@ -118,9 +122,9 @@ class IteratedStyleTransfer:
                     opt.zero_grad()                   
 
                     net(x)
-                    closs = cl() * weight_content_loss
-                    sloss = sl() * weight_style_loss
-                    tvloss = priors.tv_prior(x) * weight_tv_loss
+                    closs = cl() * lambda_content
+                    sloss = sl() * lambda_style
+                    tvloss = priors.tv_prior(x) * lambda_tv
                     loss = closs + sloss + tvloss
 
                     for plugin in plugins: 
@@ -143,39 +147,46 @@ class IteratedStyleTransfer:
                     # Projected gradient descent
                     x.data.clamp_(0, 1)
 
-                    if idx % yield_freq == 0:
-                        yield image.to_np(x), losses
+                    if idx % yield_every == 0:
+                        yield image.to_image(x), losses
 
-        yield image.to_np(x), losses
+        yield image.to_image(x), losses
 
-    def run(self, *args, **kwargs):
-        g = self.iterate(*args, **kwargs)
+    def run(self, **iterate_kwargs):
+        g = self.iterate(**iterate_kwargs)
         for x in g:
             pass
         return x
 
-    def iterate_multiscale(self, p, a, content_layer_id, style_layer_weights, sizes, x=None, scale_style=True, **kwargs):
+    def iterate_multiscale(self, nlevels=3, **iterate_kwargs):
 
-        pyr = image.Pyramid(sizes)
-        
-        with tqdm(total=len(sizes)) as t: 
-            for scaler in pyr.iterate():
+        p = iterate_kwargs.pop('content', None)
+        a = iterate_kwargs.pop('style', None)
+        _ = iterate_kwargs.pop('seed', None)
+        disable = iterate_kwargs.pop('disable_progress', True)
 
-                if x is not None:
-                    x = scaler(x)
+        f = image.pyramid_scale_factors(nlevels)
 
-                pscaled = scaler(p)
-                ascaled = scaler(a) if scale_style else a
-
-                x, losses = self.run(pscaled, ascaled, content_layer_id, style_layer_weights, x=x, disable_progress=True, **kwargs)    
+        x = p.scale_by(f[0])
+        with tqdm(total=nlevels) as t: 
+            for i in range(nlevels):
+                x, losses = self.run(
+                    content=p.scale_by(f[i]),
+                    style=a.scale_by(f[i]),
+                    seed=x,
+                    disable_progress=disable,
+                    **iterate_kwargs)
+                
+                if i < nlevels - 1:
+                    x = x.up()
 
                 t.set_postfix(loss=np.array_str(losses, precision=3))
                 t.update()
 
                 yield x, losses
 
-    def run_multiscale(self, *args, **kwargs):
-        g = self.iterate_multiscale(*args, **kwargs)
+    def run_multiscale(self, nlevels=3, **iterate_kwargs):
+        g = self.iterate_multiscale(nlevels, **iterate_kwargs)
         for x in g:
             pass
         return x

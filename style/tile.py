@@ -1,15 +1,19 @@
 from tqdm import tqdm
 import numpy as np
 
-from style.image import borderless_view
+from style.image import borderless_view, Image
 
 class TiledGeneration:
     
     def __init__(self, st):
         self.st = st
         
-    def generate(self, seed, a, c_id, style_weights, grid_shape, border=32, **kwargs):
+    def generate(self, seed, grid_shape=(1,1), border=32, **iterate_kwargs):
         
+        _ = iterate_kwargs.pop('seed', None)
+        _ = iterate_kwargs.pop('content', None)
+        disable = iterate_kwargs.pop('disable_progress', True)
+
         final_shape = seed.shape
         tile_shape = (final_shape[0]//grid_shape[0], final_shape[1]//grid_shape[1], 3)
          
@@ -26,7 +30,11 @@ class TiledGeneration:
                     sc = tile_shape[1] * col
                     ec = tile_shape[1] * (col+1) + 2*border
 
-                    tile,_ = self.st.run(seed[sr:er,sc:ec], a, c_id, style_weights, x=np.array(seed[sr:er,sc:ec]), disable_progress=True, **kwargs)
+                    tile,_ = self.st.run(
+                        content=seed[sr:er,sc:ec],
+                        seed=seed[sr:er,sc:ec],
+                        disable_progress=disable, 
+                        **iterate_kwargs)
                     
                     sr = tile_shape[0] * row
                     er = tile_shape[0] * (row+1)
@@ -36,4 +44,4 @@ class TiledGeneration:
                     
                     t.update()
         
-        return final
+        return final.view(Image)
