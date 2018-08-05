@@ -50,8 +50,7 @@ class IteratedStyleTransfer:
         a = image.to_np(a)
 
         if x is None:
-            x = p.mean((0,1), keepdims=True)
-            x = x + np.random.randn(*p.shape).astype(np.float32)*1e-2
+            x = image.new_random_white(p.shape, mean=p)
         else:           
             x = image.to_np(x)
 
@@ -61,11 +60,8 @@ class IteratedStyleTransfer:
 
         return p, a, x    
 
-    def _sparse_layer_weights(self, layer_weights, normalize=True):
+    def _sparse_layer_weights(self, layer_weights):
         layer_weights = np.asarray(layer_weights)
-        if normalize:
-            layer_weights = layer_weights / layer_weights.sum() 
-
         layer_ids = np.where(layer_weights != 0)[0]
         layer_weights = layer_weights[layer_ids]
 
@@ -80,27 +76,48 @@ class IteratedStyleTransfer:
         ).to(self.dev)
 
         return net
+    
+    def style_weights(self, indices_or_dict=None):
+        iod = indices_or_dict
+
+        sw = np.zeros(len(self.conv_ids), dtype=np.float32)
+        if iod is None: # default
+            sw[[6,8,10]] = 1 
+        elif isinstance(iod, dict):
+            for k,v in iod.items():
+                sw[k] = v      
+        else:
+            for v in iod:
+                sw[v] = 1
+        
+        return sw / sw.sum()
 
 
-    def iterate(self, 
+    def generate(self, 
             content=None,
             style=None,
             seed=None,
-            content_id=8,
+            content_index=8,
             style_weights=None,
             lambda_content=1e-3,
             lambda_style=1e4,
             lambda_tv=5e-5,            
             lr=1e-2,
             niter=200,
-            yield_every=50,
+            yield_every=0,
             disable_progress=False,
             plugins=None):
 
-        assert len(style_weights) == len(self.conv_ids), 'Need exactly one weight per Conv layer'
-
         plugins = plugins or []
-        
+
+        if style_weights is None:
+            style_weights = self.style_weights()
+
+        assert len(style_weights) == len(self.conv_ids), 'Need exactly one weight per Conv layer'
+        assert content_index < len(self.conv_ids), 'Convolutional layer not available'
+
+        content_id = self.conv_ids[content_index]
+
         p, a, x = self._create_image_tensors(content, style, seed)
         style_ids, style_weights = self._sparse_layer_weights(style_weights)
         net = self._create_network(content_id, style_ids)
@@ -147,49 +164,45 @@ class IteratedStyleTransfer:
                     # Projected gradient descent
                     x.data.clamp_(0, 1)
 
-                    if idx % yield_every == 0:
-                        yield image.to_image(x), losses
+                    if yield_every > 0 and idx % yield_every == 0:
+                        yield image.to_image(x)
 
-        yield image.to_image(x), losses
+        yield image.to_image(x)
 
-    def run(self, **iterate_kwargs):
-        g = self.iterate(**iterate_kwargs)
-        for x in g:
-            pass
-        return x
-
-    def iterate_multiscale(self, nlevels=3, **iterate_kwargs):
+    def generate_multiscale(self, nlevels=3, **iterate_kwargs):
 
         p = iterate_kwargs.pop('content', None)
         a = iterate_kwargs.pop('style', None)
-        _ = iterate_kwargs.pop('seed', None)
+        x = iterate_kwargs.pop('seed', None)
         disable = iterate_kwargs.pop('disable_progress', True)
-
+        yield_every = iterate_kwargs.pop('yield_every', 0)
+    
         f = image.pyramid_scale_factors(nlevels)
 
-        x = p.scale_by(f[0])
+        if x is not None:
+            x = x.scale_by(f[0])
         with tqdm(total=nlevels) as t: 
             for i in range(nlevels):
-                x, losses = self.run(
+                g = self.generate(
                     content=p.scale_by(f[i]),
                     style=a.scale_by(f[i]),
                     seed=x,
                     disable_progress=disable,
+                    yield_every=0,
                     **iterate_kwargs)
-                
+
+                x = next(g)
+
                 if i < nlevels - 1:
                     x = x.up()
 
-                t.set_postfix(loss=np.array_str(losses, precision=3))
                 t.update()
 
-                yield x, losses
-
-    def run_multiscale(self, nlevels=3, **iterate_kwargs):
-        g = self.iterate_multiscale(nlevels, **iterate_kwargs)
-        for x in g:
-            pass
-        return x
+                if yield_every > 0:
+                    yield x # yield intermediate results
+        
+        if yield_every == 0:
+            yield x
 
     def _max_lr(self, opt):
         return max([g['lr'] for g in opt.param_groups])    

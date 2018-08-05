@@ -5,6 +5,7 @@ import torchvision.transforms as t
 from collections import namedtuple
 import PIL
 
+from style.random import white_noise
 
 vgg_mean = torch.tensor([0.485, 0.456, 0.406])
 vgg_std = torch.tensor([0.229, 0.224, 0.225])
@@ -44,19 +45,23 @@ def to_pil(x):
 def open(fname):
     return to_image(to_np(PIL.Image.open(fname).convert('RGB')))
 
+def new_random_white(shape, mean=None, sigma=1e-2):
+    if mean is None:
+        mean = np.array([0.5,0.5,0.5]).reshape(1,1,3)
+    elif isinstance(mean, (np.ndarray, np.generic)):
+        mean = mean.mean((0,1), keepdims=True)
+
+    img = np.clip(mean + white_noise(shape, sigma), 0, 1)
+    return to_image(img)
+
 def save(fname, x):
     to_pil(x).save(fname)
 
 BILINEAR = PIL.Image.BILINEAR
 NEAREST = PIL.Image.NEAREST
 
-def noisy(x, mean=0, std=1e-2):
-    n = np.random.normal(mean, std, size=x.shape).astype(np.float32)*std + mean
-    return np.clip(x+n, 0, 1)
-
 def pyramid_scale_factors(nlevels=3):
     return [0.5**l for l in range(nlevels)][::-1]
-
 
 def borderless_view(x, border):    
     b = border
@@ -154,8 +159,7 @@ class Image(np.ndarray):
         if not isinstance(shape, tuple):
             shape = (shape, shape)
         
-        h,w = self.data.shape[:2]
-        return self.resize(shape, resample=resample)
+        return self.resize(shape[:2], resample=resample)
                 
     def scale_short_to(self, size, resample=BILINEAR):
         return self._scale_side_to(np.argmin, size, resample)
