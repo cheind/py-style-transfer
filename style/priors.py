@@ -1,8 +1,6 @@
 import torch
 import torch.nn.functional as F
 
-
-
 def tv_prior(x):
     '''Computes the total variation loss'''
 

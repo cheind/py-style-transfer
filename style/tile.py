@@ -13,6 +13,7 @@ class TiledGeneration:
         _ = iterate_kwargs.pop('seed', None)
         _ = iterate_kwargs.pop('content', None)
         disable = iterate_kwargs.pop('disable_progress', True)
+        yield_every = iterate_kwargs.pop('yield_every', 0)
 
         final_shape = seed.shape
         tile_shape = (final_shape[0]//grid_shape[0], final_shape[1]//grid_shape[1], 3)
@@ -30,18 +31,25 @@ class TiledGeneration:
                     sc = tile_shape[1] * col
                     ec = tile_shape[1] * (col+1) + 2*border
 
-                    tile,_ = self.st.run(
+                    g = self.st.generate(
                         content=seed[sr:er,sc:ec],
                         seed=seed[sr:er,sc:ec],
                         disable_progress=disable, 
+                        yield_every=0,
                         **iterate_kwargs)
                     
+                    tile = next(g)   
+                    bltile = borderless_view(tile, border)            
+
                     sr = tile_shape[0] * row
                     er = tile_shape[0] * (row+1)
                     sc = tile_shape[1] * col
                     ec = tile_shape[1] * (col+1)
-                    final[sr:er,sc:ec] = borderless_view(tile, border)
+                    final[sr:er,sc:ec] = bltile
+
+                    if yield_every > 0:
+                        yield bltile
                     
                     t.update()
-        
-        return final.view(Image)
+                
+        yield final.view(Image)
