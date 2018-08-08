@@ -1,9 +1,10 @@
 
 ## Neural style transfer
 
-![](etc/bridge_final.png)
+![](etc/bridge_vangogh.png)
+*Style transfer applied to a picture of the Golden Gate bridge using on Vincent van Gogh's 'The Starry Night' artistic style. A result using Picasso's work can be found [here](etc/bridge_picasso.png).*
 
-**py-style-transfer** implements image style transfer as proposed by [1]. Given an artistic image and a content image, the method iteratively generates an image that is similar to the content but drawn in the desired artistic style. While the method is not real-time capable, it is the most flexible approach, not requiring any pre-training expect for a readily available pre-trained convolutional architecture such as VGG. While this implementation is based on [1] we also incorporate ideas from [2,3].
+**py-style-transfer** implements image style transfer as proposed by [1]. Given an artistic image and a content image, the method iteratively generates an image that is similar to the content but drawn in the desired artistic style. While the method is not real-time capable, it is the most flexible approach, not requiring any style pre-training expect for a readily available pre-trained convolutional architecture such as VGG. While this implementation is based on [1] we also incorporate ideas from [2,3].
 
 In this work we extend the approach to two more use-cases
  - **Seamless mode** generates tiles that can be stacked vertically/horizontally without visual seams.
