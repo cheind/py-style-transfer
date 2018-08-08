@@ -4,7 +4,7 @@
 
 In this work we extend the approach to two more use-cases
  - **Seamless mode** generates tiles that can be stacked vertically/horizontally without visual seams.
- - **Tiled mode** allows generation of very large images that would otherwise not fit into memory. Like this [8192x8192 10Mb/Jpeg](https://drive.google.com/file/d/1modc1iGmTUx4LGbh-ZCTZsXxjujf-eHQ/view?usp=sharing) pure Picasso artistic style image.
+ - **Tiled mode** allows generation of very large images that would otherwise not fit into memory. Like [this 8192x8192 10Mb/JPEG](https://drive.google.com/file/d/1modc1iGmTUx4LGbh-ZCTZsXxjujf-eHQ/view?usp=sharing) pure Picasso artistic style image.
 
 See the interactive [StyleTransfer.ipynb](StyleTransfer.ipynb) notebook for usage and examples.
 
@@ -16,4 +16,12 @@ See the interactive [StyleTransfer.ipynb](StyleTransfer.ipynb) notebook for usag
 
  ### License
 
- MIT License
+```
+Copyright 2018 Christoph Heindl
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
