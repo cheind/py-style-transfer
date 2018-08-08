@@ -1,4 +1,7 @@
+
 ## Neural style transfer
+
+![](etc/bridge_final.png)
 
 **py-style-transfer** implements image style transfer as proposed by [1]. Given an artistic image and a content image, the method iteratively generates an image that is similar to the content but drawn in the desired artistic style. While the method is not real-time capable, it is the most flexible approach, not requiring any pre-training expect for a readily available pre-trained convolutional architecture such as VGG. While this implementation is based on [1] we also incorporate ideas from [2,3].
 
