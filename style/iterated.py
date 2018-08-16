@@ -11,6 +11,8 @@ from tqdm import tqdm
 import style.image as image
 import style.priors as priors
 
+from contextlib import ExitStack
+
 class Normalize(torch.nn.Module):
     def __init__(self):
         super(Normalize, self).__init__()
@@ -44,7 +46,7 @@ class IteratedStyleTransfer:
     def _create_image_tensors(self, p, a, x):        
                 
         if p is None:
-            p = a
+            p = x if x is not None else a
 
         p = image.to_np(p)
         a = image.to_np(a)
@@ -106,7 +108,10 @@ class IteratedStyleTransfer:
             niter=200,
             yield_every=0,
             disable_progress=False,
-            plugins=None):
+            plugins=None,
+            semantic_style=None,
+            semantic_content=None,
+            lambda_semantic=1e1):
 
         plugins = plugins or []
 
@@ -119,13 +124,21 @@ class IteratedStyleTransfer:
         content_id = self.conv_ids[content_index]
 
         p, a, x = self._create_image_tensors(content, style, seed)
+
         style_ids, style_weights = self._sparse_layer_weights(style_weights)
         net = self._create_network(content_id, style_ids)
         
         opt = optim.Adam([x], lr=lr)
         scheduler = sched.ReduceLROnPlateau(opt, 'min', threshold=1e-3, patience=20, cooldown=50, min_lr=1e-4)
-        
-        with ContentLoss(net[1], content_id) as cl, StyleLoss(net[1], style_ids, style_weights) as sl:
+
+        with ExitStack() as stack:
+            cl = stack.enter_context(ContentLoss(net[1], content_id))
+            if semantic_style is not None:
+                assert semantic_content is not None
+                sl = stack.enter_context(SemanticStyleLoss(net[1], style_ids, style_weights, semantic_style, semantic_content, lambda_semantic))
+            else:
+                sl = stack.enter_context(StyleLoss(net[1], style_ids, style_weights))
+
             with torch.no_grad():
                 net(p); cl.init()
                 net(a); sl.init()
@@ -174,19 +187,28 @@ class IteratedStyleTransfer:
         p = iterate_kwargs.pop('content', None)
         a = iterate_kwargs.pop('style', None)
         x = iterate_kwargs.pop('seed', None)
+        p_sem = iterate_kwargs.pop('semantic_content', None)
+        a_sem = iterate_kwargs.pop('semantic_style', None)
+
         disable = iterate_kwargs.pop('disable_progress', True)
         yield_every = iterate_kwargs.pop('yield_every', 0)
     
         f = image.pyramid_scale_factors(nlevels)
 
-        if x is not None:
-            x = x.scale_by(f[0])
+        def scale_by(x, f):
+            if x is not None:
+                x = x.scale_by(f)
+            return x
+
+        x = scale_by(x, f[0])
         with tqdm(total=nlevels) as t: 
             for i in range(nlevels):
                 g = self.generate(
-                    content=p.scale_by(f[i]),
-                    style=a.scale_by(f[i]),
+                    content=scale_by(p, f[i]),
+                    style=scale_by(a, f[i]),                    
                     seed=x,
+                    semantic_style=scale_by(a_sem, f[i]),
+                    semantic_content=scale_by(p_sem, f[i]),
                     disable_progress=disable,
                     yield_every=0,
                     **iterate_kwargs)
@@ -271,3 +293,25 @@ class StyleLoss:
         c, n = x.shape[1], x.shape[2]*x.shape[3]
         f = x.view(c, n)
         return torch.mm(f, f.t()) / (c*n)
+
+
+class SemanticStyleLoss(StyleLoss):
+
+    def __init__(self, net, style_layer_ids, style_layer_weights, semantic_style, semantic_content, lambda_semantic=1e1):
+        super(SemanticStyleLoss, self).__init__(net, style_layer_ids, style_layer_weights)
+        self.semantic_style = image.to_torch(semantic_style)
+        self.semantic_content = image.to_torch(semantic_content)
+        self.lambda_semantic = lambda_semantic
+
+    def init(self):
+        sem = self.act[0].new_tensor(self.semantic_style) * self.lambda_semantic
+        self.semantic_stack_style = [F.adaptive_max_pool2d(sem, x.shape[-2:]) for x in self.act]                
+        self.A = [self.gram(torch.cat((x,s),1)).data.clone() for x,s in zip(self.act, self.semantic_stack_style)]
+
+    def __call__(self):
+        sem = self.act[0].new_tensor(self.semantic_content) * self.lambda_semantic
+        sem_stack = [F.adaptive_max_pool2d(sem, x.shape[-2:]) for x in self.act]
+
+        G = [self.gram(torch.cat((x,s),1)) for x,s in zip(self.act, sem_stack)]
+        E = torch.stack([w * F.mse_loss(g, a).view(-1) for g,a,w in zip(G, self.A, self.w)])
+        return E.sum()

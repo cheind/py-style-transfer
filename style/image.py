@@ -51,7 +51,7 @@ def new_random_white(shape, mean=None, sigma=1e-2):
     elif isinstance(mean, (np.ndarray, np.generic)):
         mean = mean.mean((0,1), keepdims=True)
 
-    img = np.clip(mean + white_noise(shape, sigma), 0, 1)
+    img = np.clip(mean + white_noise(shape, sigma), 0, 1).astype(np.float32)
     return to_image(img)
 
 def save(fname, x):
