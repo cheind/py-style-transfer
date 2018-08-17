@@ -137,7 +137,8 @@ class IteratedStyleTransfer:
                 assert semantic_content is not None
                 sl = stack.enter_context(SemanticStyleLoss(net[1], style_ids, style_weights, semantic_style, semantic_content, lambda_semantic))
             else:
-                sl = stack.enter_context(StyleLoss(net[1], style_ids, style_weights))
+                #sl = stack.enter_context(StyleLoss(net[1], style_ids, style_weights))
+                sl = stack.enter_context(PatchStyleLoss(net[1], style_ids, style_weights, k=3, s=3))
 
             with torch.no_grad():
                 net(p); cl.init()
@@ -293,6 +294,61 @@ class StyleLoss:
         c, n = x.shape[1], x.shape[2]*x.shape[3]
         f = x.view(c, n)
         return torch.mm(f, f.t()) / (c*n)
+
+class PatchStyleLoss(StyleLoss):
+    def __init__(self, net, style_layer_ids, style_layer_weights, k=3, s=1):
+        super(PatchStyleLoss, self).__init__(net, style_layer_ids, style_layer_weights)
+        self.k = k
+        self.s = s
+        
+    def init(self):
+        # Extract patches and represent them as kernels of convolutions.
+        self.patches = [self._extract_patches(act, self.k, self.s) for act in self.act]
+        #self.patches = [self._normalize_patch(p) for p in self.patches]
+
+    def __call__(self):
+        
+        e = []
+        for idx, (pref, act) in enumerate(zip(self.patches, self.act)):
+            r = F.conv2d(act, pref, padding=1)
+            idx = torch.argmax(r, 1)
+            print(act.shape, idx.shape, pref.shape)
+            r = torch.index_select(r, 1, idx.squeeze())
+            print(r.shape)
+
+            break
+
+        return torch.stack([0]).sum()
+
+    def _normalize_patch(self, x):
+        n = torch.norm(x, p=2, dim=1).detach()
+        return x.div(n.expand_as(x))
+
+    def _extract_patches(self, x, k, s):
+        b, c, h, w = x.shape
+
+        # convolutional arithmetic
+        # https://arxiv.org/pdf/1603.07285.pdf
+
+        oh = int((h - k) / s) + 1
+        ow = int((w - k) / s) + 1
+
+        oc = oh*ow
+        weights = x.new_empty((oc, c, k, k))
+
+        for i in range(oh):
+            for j in range(ow):
+                weights[i*ow + j] = x[..., i*s:i*s+k, j*s:j*s+k]
+        
+        return weights
+
+    def _pairwise_distances(self, x, y):
+        # Expanded squared norm computation between all pairs of x and y
+        x_norm = (x**2).sum(1).view(-1, 1)
+        y_t = torch.transpose(y, 0, 1)
+        y_norm = (y**2).sum(1).view(1, -1)    
+        dist = x_norm + y_norm - 2.0 * torch.mm(x, y_t)
+        return torch.clamp(dist, 0.0, np.inf)
 
 
 class SemanticStyleLoss(StyleLoss):
