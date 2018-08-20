@@ -54,6 +54,9 @@ def new_random_white(shape, mean=None, sigma=1e-2):
     img = np.clip(mean + white_noise(shape, sigma), 0, 1).astype(np.float32)
     return to_image(img)
 
+def new_random_range(shape, low=0, high=0.95):
+    return to_image(np.random.uniform(low, high, size=shape).astype(np.float32))
+
 def save(fname, x):
     to_pil(x).save(fname)
 
