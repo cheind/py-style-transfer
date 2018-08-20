@@ -84,7 +84,7 @@ class IteratedStyleTransfer:
 
         sw = np.zeros(len(self.conv_ids), dtype=np.float32)
         if iod is None: # default
-            sw[[6,8,10]] = 1 
+            sw[[5,9]] = 1 
         elif isinstance(iod, dict):
             for k,v in iod.items():
                 sw[k] = v      
@@ -94,6 +94,19 @@ class IteratedStyleTransfer:
         
         return sw / sw.sum()
 
+    def style_loss_from_type_(self, style_loss_type, net, style_ids, style_weights):
+        if style_loss_type == 'gram':
+            sl = StyleLoss(net[1], style_ids, style_weights)
+        elif style_loss_type == 'patch':
+            sl = PatchStyleLoss(net[1], style_ids, style_weights, k=3, s=1)
+        return sl
+
+        #if semantic_style is not None:
+        #    assert semantic_content is not None
+        #    sl = stack.enter_context(SemanticStyleLoss(net[1], style_ids, style_weights, semantic_style, semantic_content, lambda_semantic))
+        #else:
+            #sl = stack.enter_context(StyleLoss(net[1], style_ids, style_weights))
+        #    sl = stack.enter_context()
 
     def generate(self, 
             content=None,
@@ -101,6 +114,7 @@ class IteratedStyleTransfer:
             seed=None,
             content_index=8,
             style_weights=None,
+            style_loss_type='gram',
             lambda_content=1e-3,
             lambda_style=1e4,
             lambda_tv=5e-5,            
@@ -133,12 +147,13 @@ class IteratedStyleTransfer:
 
         with ExitStack() as stack:
             cl = stack.enter_context(ContentLoss(net[1], content_id))
-            if semantic_style is not None:
-                assert semantic_content is not None
-                sl = stack.enter_context(SemanticStyleLoss(net[1], style_ids, style_weights, semantic_style, semantic_content, lambda_semantic))
-            else:
+            sl = stack.enter_context(self.style_loss_from_type_(style_loss_type, net, style_ids, style_weights))
+            #if semantic_style is not None:
+            #    assert semantic_content is not None
+            #    sl = stack.enter_context(SemanticStyleLoss(net[1], style_ids, style_weights, semantic_style, semantic_content, lambda_semantic))
+            #else:
                 #sl = stack.enter_context(StyleLoss(net[1], style_ids, style_weights))
-                sl = stack.enter_context(PatchStyleLoss(net[1], style_ids, style_weights, k=3, s=3))
+            #    sl = stack.enter_context(PatchStyleLoss(net[1], style_ids, style_weights, k=3, s=1))
 
             with torch.no_grad():
                 net(p); cl.init()
@@ -218,6 +233,7 @@ class IteratedStyleTransfer:
 
                 if i < nlevels - 1:
                     x = x.up()
+
 
                 t.update()
 
@@ -303,52 +319,46 @@ class PatchStyleLoss(StyleLoss):
         
     def init(self):
         # Extract patches and represent them as kernels of convolutions.
-        self.patches = [self._extract_patches(act, self.k, self.s) for act in self.act]
-        #self.patches = [self._normalize_patch(p) for p in self.patches]
+        self.style_act = [a.detach().clone() for a in self.act]
 
     def __call__(self):
         
         e = []
-        for idx, (pref, act) in enumerate(zip(self.patches, self.act)):
-            r = F.conv2d(act, pref, padding=1)
-            idx = torch.argmax(r, 1)
-            print(act.shape, idx.shape, pref.shape)
-            r = torch.index_select(r, 1, idx.squeeze())
-            print(r.shape)
+        for sa, a, w in zip(self.style_act, self.act, self.w):
+            pa, psa = self.nearest(a, sa, kx=self.k, ky=self.k, sy=self.s, sx=1)
+            e.append(w * F.mse_loss(pa, psa).view(-1))
 
-            break
+        return torch.stack(e).sum()
 
-        return torch.stack([0]).sum()
-
-    def _normalize_patch(self, x):
-        n = torch.norm(x, p=2, dim=1).detach()
-        return x.div(n.expand_as(x))
-
-    def _extract_patches(self, x, k, s):
-        b, c, h, w = x.shape
-
-        # convolutional arithmetic
-        # https://arxiv.org/pdf/1603.07285.pdf
-
-        oh = int((h - k) / s) + 1
-        ow = int((w - k) / s) + 1
-
-        oc = oh*ow
-        weights = x.new_empty((oc, c, k, k))
-
-        for i in range(oh):
-            for j in range(ow):
-                weights[i*ow + j] = x[..., i*s:i*s+k, j*s:j*s+k]
+    def nearest(self, x, y, kx=3, sx=1, ky=3, sy=1):
+        '''Returns the nearest neighbor patch in y for every patch in x
+        according to normalized cross correlation.
         
-        return weights
+        Params
+        ------
+        x : 1xCxHxW tensor
+        y : 1xCxH'xW' tensor
+        
+        Returns
+        -------
+        px : NxK*K*C tensor
+        py : NxK*K*C tensor
+        
+        with N being the number of patches in x.    
+        '''
+        with torch.no_grad():
+            py = F.unfold(y, ky, stride=sy).transpose(1,2).squeeze(0) # nxp
+            ny = torch.norm(py, 2, 1)
 
-    def _pairwise_distances(self, x, y):
-        # Expanded squared norm computation between all pairs of x and y
-        x_norm = (x**2).sum(1).view(-1, 1)
-        y_t = torch.transpose(y, 0, 1)
-        y_norm = (y**2).sum(1).view(1, -1)    
-        dist = x_norm + y_norm - 2.0 * torch.mm(x, y_t)
-        return torch.clamp(dist, 0.0, np.inf)
+        px = F.unfold(x, kx, stride=sx).transpose(1,2).squeeze(0) # mxp
+        nx = torch.norm(px, 2, 1) # treat norm as constant during opt
+                    
+        d = py.matmul(px.t()) # nominator casted as convolution, nxm
+        n = nx.view(1, -1) * ny.view(-1, 1) # outer product nxm
+        
+        nid = torch.argmax(d/n, 0)
+        
+        return px, py.index_select(0, nid)
 
 
 class SemanticStyleLoss(StyleLoss):
