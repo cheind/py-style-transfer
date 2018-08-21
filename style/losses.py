@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from style.image import to_np, to_torch, to_image
+from style.image import to_np, to_torch, to_image, NEAREST
 
 class BaseLoss:
     def __enter__(self):
@@ -220,25 +220,66 @@ class PatchStyle(GramStyle):
             
             return px, py.index_select(0, nid)
 
-"""
-class SemanticStyleLoss(PatchStyleLoss):
 
-    def __init__(self, net, style_layer_ids, style_layer_weights, semantic_style, semantic_content, lambda_semantic=1e1):
-        super(SemanticStyleLoss, self).__init__(net, style_layer_ids, style_layer_weights)
-        self.semantic_style = image.to_torch(semantic_style)
-        self.semantic_content = image.to_torch(semantic_content)
-        self.lambda_semantic = lambda_semantic
+class SemanticStyle(PatchStyle):
 
-    def init(self):
-        sem = self.act[0].new_tensor(self.semantic_style) * self.lambda_semantic
-        self.semantic_stack_style = [F.adaptive_max_pool2d(sem, x.shape[-2:]) for x in self.act]                
-        self.A = [self.gram(torch.cat((x,s),1)).data.clone() for x,s in zip(self.act, self.semantic_stack_style)]
+    def __init__(
+        self, 
+        image=None, layer_ids=None, layer_weights=None, 
+        lambda_loss=1e-2, k=3, s=1,         
+        semantic_style_image=None, 
+        semantic_content_image=None,
+        gamma=1e1
+        ):
+        
+        super(SemanticStyle, self).__init__(
+            image=image, 
+            layer_ids=layer_ids,
+            layer_weights=layer_weights, 
+            lambda_loss=lambda_loss, 
+            k=k, s=s)        
 
-    def __call__(self):
-        sem = self.act[0].new_tensor(self.semantic_content) * self.lambda_semantic
-        sem_stack = [F.adaptive_max_pool2d(sem, x.shape[-2:]) for x in self.act]
+        self.semantic_style_image = to_np(semantic_style_image)
+        self.semantic_content_image = to_np(semantic_content_image)
+        self.gamma = gamma
 
-        G = [self.gram(torch.cat((x,s),1)) for x,s in zip(self.act, sem_stack)]
-        E = torch.stack([w * F.mse_loss(g, a).view(-1) for g,a,w in zip(G, self.A, self.w)])
-        return E.sum()
-"""
+    def create_loss(self, net, dev):
+        return SemanticStyle.Loss(
+            net, dev, self.layer_ids, self.layer_weights, self.image, self.k, self.s, 
+            self.semantic_style_image, self.semantic_content_image, self.gamma)
+
+    def scale_by(self, f):
+        image = to_image(self.image).scale_by(f) 
+        sem_style = to_image(self.semantic_style_image).scale_by(f, resample=NEAREST)
+        sem_cont = to_image(self.semantic_content_image).scale_by(f, resample=NEAREST)
+
+        return SemanticStyle(
+            image=self.image, 
+            layer_ids=self.layer_ids, 
+            layer_weights=self.layer_weights, 
+            lambda_loss=self.lambda_loss, 
+            k=self.k, s=self.s,
+            semantic_style_image=sem_style,
+            semantic_content_image=sem_cont,
+            gamma=self.gamma)
+
+
+    class Loss(PatchStyle.Loss):
+
+        def __init__(self, net, dev, lids, w, image, k, s, sem_style, sem_cont, gamma):
+            super(SemanticStyle.Loss, self).__init__(net, dev, lids, w, image, k, s)
+            self.sem_style = to_torch(sem_style).to(dev) * gamma
+            self.sem_cont = to_torch(sem_cont).to(dev) * gamma
+
+        def init(self):
+            # Called from enter of GramStyle
+            with torch.no_grad():
+                self.net(self.image)
+                self.style_act = self.create_stack(self.sem_style)
+
+        def __call__(self):
+            self.act = self.create_stack(self.sem_cont)
+            return super(SemanticStyle.Loss, self).__call__()
+
+        def create_stack(self, semantic):
+            return [torch.cat((a, F.adaptive_avg_pool2d(semantic, a.shape[-2:])), 1) for a in self.act]
