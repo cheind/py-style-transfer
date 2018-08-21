@@ -2,7 +2,9 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-class LossFnc:
+from style.image import to_np, to_torch, to_image
+
+class BaseLoss:
     def __enter__(self):
         self.enter()
         return self
@@ -22,31 +24,57 @@ class LossFnc:
     def __call__(self):
         raise NotImplementedError()
 
-class LayerLoss(object):
+class NoopLoss(BaseLoss):
+    def __init__(self, dev):
+        self.z = torch.tensor([0], dtype=torch.float32).to(dev)
+
+    def __call__(self):
+        return self.z
+
+class LossProvider(object):
     '''Base class for feature map based layer losses.'''
 
     def __init__(self, layer_ids, lambda_loss):
         self.layer_ids = layer_ids
         self.lambda_loss = lambda_loss
 
-    def create_loss(self, net):
+    def create_loss(self, net, dev):
         raise NotImplementedError()
 
-class ContentLoss(LayerLoss):
+class Content(LossProvider):
 
-    def __init__(self, layer_id, lambda_loss=1e-3):
-        super(ContentLoss, self).__init__([layer_id], lambda_loss)  
+    def __init__(self, image=None, layer_id=8, lambda_loss=1e-3):
+        super(Content, self).__init__([layer_id], lambda_loss)
 
-    def create_loss(self, net):
-        return ContentLoss.Fnc(net, self.layer_ids[0])
+        if image is not None:
+            self.image = to_np(image)
+        else:
+            self.image = None
 
-    class Fnc(LossFnc):
-        def __init__(self, net, lid):
+    def create_loss(self, net, dev):
+        if self.image is not None:
+            return Content.Loss(net, dev, self.layer_ids[0], self.image)
+        else:
+            return NoopLoss(dev)
+
+    def scale_by(self, f):
+        image = None
+        if self.image is not None:
+            image = to_image(self.image).scale_by(f)           
+
+        return Content(image, self.layer_ids[0], self.lambda_loss)
+
+
+    class Loss(BaseLoss):
+        def __init__(self, net, dev, lid, image):
             self.net = net
             self.lid = lid
+            self.dev = dev
+            self.image = to_torch(image).to(dev)
             
         def enter(self):
             self.hook = self.net[self.lid].register_forward_hook(self.hookfn)
+            self.init()
 
         def hookfn(self, n, inp, outp):
             self.act = outp
@@ -55,28 +83,38 @@ class ContentLoss(LayerLoss):
             self.hook.remove()
 
         def init(self):
-            # assumes net(content) called
-            self.ref = self.act.data.clone()
-            
+            with torch.no_grad():
+                self.net(self.image)
+                self.ref = self.act.data.clone()
+                
         def __call__(self):
             # assumes net(x) called
             return F.mse_loss(self.act, self.ref)
 
 
-class GramStyleLoss(LayerLoss):
+class GramStyle(LossProvider):
 
-    def __init__(self, layer_ids, layer_weights=None, lambda_loss=1e4):        
-        super(GramStyleLoss, self).__init__(layer_ids, lambda_loss)
+    def __init__(self, image=None, layer_ids=None, layer_weights=None, lambda_loss=1e4):        
+        if layer_ids is None:
+            layer_ids = [6,8,10]
+
+        super(GramStyle, self).__init__(layer_ids, lambda_loss)
         self.layer_weights = layer_weights
+        self.image = to_np(image)
 
-    def create_loss(self, net):
-        return GramStyleLoss.Fnc(net, self.layer_ids, self.layer_weights)
+    def create_loss(self, net, dev):
+        return GramStyle.Loss(net, dev, self.layer_ids, self.layer_weights, self.image)
 
-    class Fnc(LossFnc):
-        def __init__(self, net, lids, w):
+    def scale_by(self, f):
+        image = to_image(self.image).scale_by(f) 
+        return GramStyle(image, self.layer_ids, self.layer_weights, self.lambda_loss)
+
+    class Loss(BaseLoss):
+        def __init__(self, net, dev, lids, w, image):
             self.lids = lids
             self.w = w
             self.net = net
+            self.image = to_torch(image).to(dev)
 
         def enter(self):
             layers = [self.net[l] for l in self.lids]
@@ -91,6 +129,7 @@ class GramStyleLoss(LayerLoss):
                 self.w = np.asarray(self.w).tolist()
 
             self.act = []
+            self.init()
 
         def hookfn(self, n, inp, outp):
             self.act.append(outp)
@@ -103,8 +142,9 @@ class GramStyleLoss(LayerLoss):
             self.prehook.remove()
 
         def init(self):
-            # assumes net(a) called     
-            self.A = [self.gram(x).data.clone() for x in self.act]
+            with torch.no_grad():
+                self.net(self.image)
+                self.A = [self.gram(x).data.clone() for x in self.act]
 
         def __call__(self):
             G = [self.gram(x) for x in self.act]
@@ -116,27 +156,32 @@ class GramStyleLoss(LayerLoss):
             f = x.view(c, n)
             return torch.mm(f, f.t()) / (c*n)
 
+class PatchStyle(GramStyle):
 
-class PatchStyleLoss(GramStyleLoss):
-
-    def __init__(self, layer_ids, layer_weights=None, lambda_loss=1e-2, k=3, s=1):        
-        super(PatchStyleLoss, self).__init__(layer_ids, layer_weights, lambda_loss)
+    def __init__(self, image=None, layer_ids=None, layer_weights=None, lambda_loss=1e-2, k=3, s=1):        
+        super(PatchStyle, self).__init__(image, layer_ids, layer_weights, lambda_loss)
         self.k = k
         self.s = s
 
-    def create_loss(self, net):
-        return PatchStyleLoss.Fnc(net, self.layer_ids, self.layer_weights, self.k, self.s)
+    def create_loss(self, net, dev):
+        return PatchStyle.Loss(net, dev, self.layer_ids, self.layer_weights, self.image, self.k, self.s)
 
-    class Fnc(GramStyleLoss.Fnc):
+    def scale_by(self, f):
+        image = to_image(self.image).scale_by(f) 
+        return PatchStyle(image, self.layer_ids, self.layer_weights, self.lambda_loss, self.k, self.s)
 
-        def __init__(self, net, lids, w, k, s):
-            super(PatchStyleLoss.Fnc, self).__init__(net, lids, w)
+    class Loss(GramStyle.Loss):
+
+        def __init__(self, net, dev, lids, w, image, k, s):
+            super(PatchStyle.Loss, self).__init__(net, dev, lids, w, image)
             self.k = k
             self.s = s
 
         def init(self):
-            # assumes net(a) called   
-            self.style_act = [a.detach().clone() for a in self.act]  
+            # Called from enter of GramStyle
+            with torch.no_grad():
+                self.net(self.image)
+                self.style_act = [a.detach().clone() for a in self.act]  
 
         def __call__(self):
             e = []
@@ -175,7 +220,7 @@ class PatchStyleLoss(GramStyleLoss):
             
             return px, py.index_select(0, nid)
 
-
+"""
 class SemanticStyleLoss(PatchStyleLoss):
 
     def __init__(self, net, style_layer_ids, style_layer_weights, semantic_style, semantic_content, lambda_semantic=1e1):
@@ -196,3 +241,4 @@ class SemanticStyleLoss(PatchStyleLoss):
         G = [self.gram(torch.cat((x,s),1)) for x,s in zip(self.act, sem_stack)]
         E = torch.stack([w * F.mse_loss(g, a).view(-1) for g,a,w in zip(G, self.A, self.w)])
         return E.sum()
+"""

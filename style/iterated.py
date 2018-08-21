@@ -11,38 +11,17 @@ from tqdm import tqdm
 import style.image as image
 import style.priors as priors
 
-from style.losses import ContentLoss, GramStyleLoss
+from style.losses import Content, GramStyle
 
 class IteratedStyleTransfer:
     def __init__(self, backbone):
         self.backbone = backbone
 
-    def _create_image_tensors(self, p, a, x):        
-                
-        if p is None:
-            p = x if x is not None else a
-
-        p = image.to_np(p)
-        a = image.to_np(a)
-
-        if x is None:
-            x = image.new_random_white(p.shape, mean=p)
-        else:           
-            x = image.to_np(x)
-
-        p = image.to_torch(p).to(self.backbone.dev)
-        a = image.to_torch(a).to(self.backbone.dev)
-        x = image.to_torch(x).to(self.backbone.dev).requires_grad_()    
-
-        return p, a, x    
-
 
     def generate(self, 
-            content=None,
-            style=None,
+            style,
+            content=None,            
             seed=None,
-            content_loss=None,
-            style_loss=None,
             lambda_tv=5e-5,            
             lr=1e-2,
             niter=200,
@@ -50,24 +29,20 @@ class IteratedStyleTransfer:
             disable_progress=False,
             plugins=None):
 
+
+        content = content or Content(layer_id=8)
         plugins = plugins or []
-        p, a, x = self._create_image_tensors(content, style, seed)
+
+        x = self._get_or_create_seed(content, style, seed)
 
         opt = optim.Adam([x], lr=lr)
         scheduler = sched.ReduceLROnPlateau(opt, 'min', threshold=1e-3, patience=20, cooldown=50, min_lr=1e-4)
 
-        content_loss = content_loss or ContentLoss(8)
-        style_loss = style_loss or GramStyleLoss([6,8,10]) # note, not using conv layer indices by default.
-
-        net = self.backbone.trimmed_net(max(content_loss.layer_ids + style_loss.layer_ids))
+        net = self.backbone.trimmed_net(max(content.layer_ids + style.layer_ids))
         
-        with content_loss.create_loss(net) as cl, style_loss.create_loss(net) as sl:
+        with content.create_loss(net, self.backbone.dev) as cl, style.create_loss(net, self.backbone.dev) as sl:
         
-            with torch.no_grad():
-                net(p); cl.init()
-                net(a); sl.init()
-
-            [plugin.prepare(p, a, x, niter=niter) for plugin in plugins]
+            [plugin.prepare(cl, sl, x, niter=niter) for plugin in plugins]
 
             losses = None
             with tqdm(total=niter, disable=disable_progress) as t: 
@@ -76,8 +51,8 @@ class IteratedStyleTransfer:
                     opt.zero_grad()                   
 
                     net(x)
-                    closs = cl() * content_loss.lambda_loss
-                    sloss = sl() * style_loss.lambda_loss
+                    closs = cl() * content.lambda_loss
+                    sloss = sl() * style.lambda_loss
                     tvloss = priors.tv_prior(x) * lambda_tv
                     loss = closs + sloss + tvloss
 
@@ -106,6 +81,17 @@ class IteratedStyleTransfer:
 
         yield image.to_image(x)
 
+    def _get_or_create_seed(self, content, style, x):        
+        if x is None:
+            if content.image is None:
+                x = image.new_random_white((256,256,3), mean=style.image)
+            else:
+                x = image.new_random_white(content.image.shape, mean=content.image)
+
+        return image.to_torch(x).to(self.backbone.dev).requires_grad_()    
+
+
+
     def generate_multiscale(self, nlevels=3, **iterate_kwargs):
 
         p = iterate_kwargs.pop('content', None)
@@ -126,8 +112,8 @@ class IteratedStyleTransfer:
         with tqdm(total=nlevels) as t: 
             for i in range(nlevels):
                 g = self.generate(
-                    content=scale_by(p, f[i]),
-                    style=scale_by(a, f[i]),                    
+                    content=p.scale_by(f[i]),
+                    style=a.scale_by(f[i]),                    
                     seed=x,
                     disable_progress=disable,
                     yield_every=0,
@@ -137,7 +123,6 @@ class IteratedStyleTransfer:
 
                 if i < nlevels - 1:
                     x = x.up()
-
 
                 t.update()
 
