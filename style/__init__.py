@@ -1,4 +1,6 @@
 
+from style.backbone import Backbone
+from style.losses import ContentLoss, GramStyleLoss, PatchStyleLoss
 from style.iterated import IteratedStyleTransfer
 from style.tile import TiledGeneration
 import style.image
