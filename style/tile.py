@@ -1,3 +1,8 @@
+# py-style-transfer
+# Copyright 2018 Christoph Heindl.
+# Licensed under MIT License
+# ============================================================
+
 from tqdm import tqdm
 import numpy as np
 

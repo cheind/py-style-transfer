@@ -1,3 +1,8 @@
+# py-style-transfer
+# Copyright 2018 Christoph Heindl.
+# Licensed under MIT License
+# ============================================================
+
 import torch
 import torch.nn.functional as F
 

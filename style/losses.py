@@ -1,3 +1,8 @@
+# py-style-transfer
+# Copyright 2018 Christoph Heindl.
+# Licensed under MIT License
+# ============================================================
+
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -247,7 +252,7 @@ class SemanticStyle(PatchStyle):
         semantic_style_image=None, 
         semantic_content_image=None,
         gamma=None,
-        gamma_scale=None
+        gamma_scale=0.5
         ):
         
         super(SemanticStyle, self).__init__(
@@ -291,7 +296,7 @@ class SemanticStyle(PatchStyle):
             self.sem_style = to_torch(sem_style).to(dev)
             self.sem_cont = to_torch(sem_cont).to(dev)
             self.gamma = gamma
-            self.gamma_scale = 0.5 or gamma_scale
+            self.gamma_scale = gamma_scale
 
 
         def init(self):

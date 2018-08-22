@@ -1,3 +1,8 @@
+# py-style-transfer
+# Copyright 2018 Christoph Heindl.
+# Licensed under MIT License
+# ============================================================
+
 import numpy as np
 import torch
 import torch.nn as nn

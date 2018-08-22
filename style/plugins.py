@@ -1,3 +1,7 @@
+# py-style-transfer
+# Copyright 2018 Christoph Heindl.
+# Licensed under MIT License
+# ============================================================
 
 import math
 import style.image as image
