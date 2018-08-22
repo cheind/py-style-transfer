@@ -265,7 +265,7 @@ class SemanticStyle(PatchStyle):
     def create_loss(self, net, dev):
         return SemanticStyle.Loss(
             net, dev, self.layer_ids, self.layer_weights, self.image, self.k, self.s, 
-            self.semantic_style_image, self.semantic_content_image, self.gamma)
+            self.semantic_style_image, self.semantic_content_image, self.gamma, self.gamma_scale)
 
     def scale_by(self, f):
         image = to_image(self.image).scale_by(f) 
