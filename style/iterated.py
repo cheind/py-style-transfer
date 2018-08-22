@@ -108,6 +108,8 @@ class IteratedStyleTransfer:
                 x = x.scale_by(f)
             return x
 
+        fshape = x.shape if x is not None else a.shape
+
         x = scale_by(x, f[0])
         with tqdm(total=nlevels) as t: 
             for i in range(nlevels):
@@ -123,6 +125,9 @@ class IteratedStyleTransfer:
 
                 if i < nlevels - 1:
                     x = x.up()
+                else:
+                    # ensure desired shape is matched
+                    x = x.scale_to(fshape)
 
                 t.update()
 
