@@ -2,6 +2,7 @@ from tqdm import tqdm
 import numpy as np
 
 from style.image import borderless_view, Image
+from style.losses import Content
 
 class TiledGeneration:
     
@@ -32,7 +33,7 @@ class TiledGeneration:
                     ec = tile_shape[1] * (col+1) + 2*border
 
                     g = self.st.generate(
-                        content=seed[sr:er,sc:ec],
+                        content=Content(seed[sr:er,sc:ec]),
                         seed=seed[sr:er,sc:ec],
                         disable_progress=disable, 
                         yield_every=0,
