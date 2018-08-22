@@ -193,30 +193,47 @@ class PatchStyle(GramStyle):
         def nearest(self, x, y, kx=3, sx=1, ky=3, sy=1):
             '''Returns the nearest neighbor patch in y for every patch in x
             according to normalized cross correlation.
-            
+
             Params
             ------
             x : 1xCxHxW tensor
             y : 1xCxH'xW' tensor
-            
+
             Returns
             -------
             px : NxK*K*C tensor
             py : NxK*K*C tensor
-            
+
             with N being the number of patches in x.    
             '''
-            with torch.no_grad():
-                py = F.unfold(y, ky, stride=sy).transpose(1,2).squeeze(0) # nxp
-                ny = torch.norm(py, 2, 1)
+            py = F.unfold(y, ky, stride=sy).transpose(1,2).squeeze(0) # nxp
+            ny = torch.norm(py, 2, 1)
 
             px = F.unfold(x, kx, stride=sx).transpose(1,2).squeeze(0) # mxp
-            nx = torch.norm(px, 2, 1) # treat norm as constant during opt
-                        
-            d = py.matmul(px.t()) # nominator casted as convolution, nxm
-            n = nx.view(1, -1) * ny.view(-1, 1) # outer product nxm
             
-            nid = torch.argmax(d/n, 0)
+            # Treat px constant during nearest search, allows for splitting
+            # the matrix product. If gradients would be on, we could still split
+            # the matrix product, but memory would need to be kept for backward.
+            pxd = px.detach()
+            
+            nx = torch.norm(pxd, 2, 1) # treat norm as constant during opt
+            
+            nxs = torch.split(nx, 2048, dim=0)
+            pxds = torch.split(pxd, 2048, dim=0)
+            
+            nids = []
+            for pxd_part, nx_part in zip(pxds, nxs):
+                d = py.matmul(pxd_part.t())
+                n = nx_part.contiguous().view(1, -1) * ny.view(-1, 1)
+                nid = torch.argmax(d/n, 0)
+                nids.append(nid)        
+                
+            nid = torch.cat(nids)
+                
+            # Old memory-inefficient code
+            #d = py.matmul(pxd.t()) # nominator casted as convolution, nxm
+            #n = nx.view(1, -1) * ny.view(-1, 1) # outer product nxm
+            #nid = torch.argmax(d/n, 0)
             
             return px, py.index_select(0, nid)
 
@@ -287,7 +304,7 @@ class SemanticStyle(PatchStyle):
                     self.gamma = [self.gamma] * len(self.act)
 
                 self.style_act = self.create_stack(self.sem_style, self.gamma)
-                
+
                                 
         def __call__(self):
             self.act = self.create_stack(self.sem_cont, self.gamma)
