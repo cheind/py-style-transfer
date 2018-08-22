@@ -1,3 +1,7 @@
+# py-style-transfer
+# Copyright 2018 Christoph Heindl.
+# Licensed under MIT License
+# ============================================================
 
 import math
 import style.image as image
@@ -7,6 +11,8 @@ import numpy as np
 from PIL import Image
 
 class Plugin:
+    '''An optimization plugin base class.'''
+
     def prepare(self, p, a, x, **kwargs):
         pass
 
@@ -21,11 +27,12 @@ class Plugin:
     
 
 class SeamlessPlugin(Plugin):
+    '''Changes optimization to generate images that seamless tile.'''
 
     def __init__(self, image_shape, border):   
         self.f = min(image_shape[:2]) / border
 
-    def prepare(self, p, a, x, **kwargs):
+    def prepare(self, cl, sl, x, **kwargs):
         s = min(x.shape[-2:])
         self._border = int(max(math.ceil(s/self.f), 1))
 
@@ -45,27 +52,3 @@ class SeamlessPlugin(Plugin):
         outer.b.copy_(inner.ft)
         outer.bl.copy_(inner.tr)
         outer.l.copy_(inner.fr)
-
-class FadeInPlugin(Plugin):
-    def __init__(self, content, mask):   
-        self.mask = mask
-        self.content = content
-
-    def prepare(self, p, a, x, **kwargs):        
-        target_size = (x.shape[-1], x.shape[-2])
-        source_size = self.mask.shape[:2][::-1]
-
-        if target_size != source_size:
-            self._mask = image.resize(self.mask, (x.shape[-1], x.shape[-2]), resample=image.NEAREST)
-            self._content = image.resize(self.content, (x.shape[-1], x.shape[-2]), resample=image.BILINEAR)
-        else:
-            self._mask = self.mask    
-            self._content = self.content  
-
-        self._mask = x.new_tensor(image.to_torch(self._mask))
-        self._content = x.new_tensor(image.to_torch(self._content))
-        
-    def after_step(self, x):
-        f=0.1
-        mix = x.data * (1 - f) + self._content * f
-        x.data.copy_(x.data * (1 - self._mask) + mix * (self._mask))
