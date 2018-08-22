@@ -246,7 +246,8 @@ class SemanticStyle(PatchStyle):
         lambda_loss=1e-2, k=3, s=1,         
         semantic_style_image=None, 
         semantic_content_image=None,
-        gamma=None
+        gamma=None,
+        gamma_scale=None
         ):
         
         super(SemanticStyle, self).__init__(
@@ -259,6 +260,7 @@ class SemanticStyle(PatchStyle):
         self.semantic_style_image = to_np(semantic_style_image)
         self.semantic_content_image = to_np(semantic_content_image)
         self.gamma = gamma
+        self.gamma_scale = gamma_scale
 
     def create_loss(self, net, dev):
         return SemanticStyle.Loss(
@@ -278,16 +280,18 @@ class SemanticStyle(PatchStyle):
             k=self.k, s=self.s,
             semantic_style_image=sem_style,
             semantic_content_image=sem_cont,
-            gamma=self.gamma)
+            gamma=self.gamma,
+            gamma_scale=self.gamma_scale)
 
 
     class Loss(PatchStyle.Loss):
 
-        def __init__(self, net, dev, lids, w, image, k, s, sem_style, sem_cont, gamma):
+        def __init__(self, net, dev, lids, w, image, k, s, sem_style, sem_cont, gamma, gamma_scale):
             super(SemanticStyle.Loss, self).__init__(net, dev, lids, w, image, k, s)
             self.sem_style = to_torch(sem_style).to(dev)
             self.sem_cont = to_torch(sem_cont).to(dev)
             self.gamma = gamma
+            self.gamma_scale = 0.5 or gamma_scale
 
 
         def init(self):
@@ -316,4 +320,4 @@ class SemanticStyle(PatchStyle):
         def tune_gamma(self, a, sem):
             sem = F.adaptive_avg_pool2d(sem, a.shape[-2:])
             s = torch.norm(a, 2, 1).mean() / torch.norm(sem, 2, 1).mean()
-            return s * 0.5
+            return s * self.gamma_scale
