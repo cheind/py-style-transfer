@@ -14,11 +14,14 @@ vgg_mean = torch.tensor([0.485, 0.456, 0.406])
 vgg_std = torch.tensor([0.229, 0.224, 0.225])
 
 def to_torch(x):
+    '''Convert 'image' to BCHW torch tensor.'''
     if hasattr(x, '__array__'):
         x = np.asarray(x)
     return t.ToTensor()(x).unsqueeze(0)
 
 def to_np(x):
+    '''Convert 'image' to HWC numpy tensor.'''
+
     if isinstance(x, PIL.Image.Image):
         x = np.array(x, dtype=np.float32) / 255.0
         if x.ndim == 2:
@@ -33,9 +36,11 @@ def to_np(x):
     return x
 
 def to_image(x):
+    '''Convert 'image' to HWC numpy tensor view as style.image.Image'''
     return to_np(x).view(Image)
 
-def to_pil(x):    
+def to_pil(x): 
+    '''Convert 'image' to PIL image.'''   
     if isinstance(x, (np.ndarray, np.generic)):
         x = (x*255).astype(np.uint8)
         x = t.ToPILImage()(x)
@@ -46,9 +51,23 @@ def to_pil(x):
     return x
 
 def open(fname):
+    '''Returns style.image.Image from file path.''' 
     return to_image(to_np(PIL.Image.open(fname).convert('RGB')))
 
 def new_random_white(shape, mean=None, sigma=1e-2):
+    '''Returns style.image.Image filled with white noise.
+    
+    Params
+    ------
+    shape : HWC tuple
+        height/width/channels of image.
+
+    Kwargs
+    ------
+    mean : None, image [optional]
+        When an image is provided, applies white noise to image mean.
+        Otherwise 0.5 is chosen as mean for all channels.
+    '''
     if mean is None:
         mean = np.array([0.5,0.5,0.5]).reshape(1,1,3)
     elif isinstance(mean, (np.ndarray, np.generic)):
@@ -60,18 +79,22 @@ def new_random_white(shape, mean=None, sigma=1e-2):
     return to_image(img)
 
 def new_random_range(shape, low=0, high=0.95):
+    '''Returns style.image.Image filled with uniform random noise.'''
     return to_image(np.random.uniform(low, high, size=shape).astype(np.float32))
 
 def save(fname, x):
+    '''Save image to file.'''
     to_pil(x).save(fname)
 
 BILINEAR = PIL.Image.BILINEAR
 NEAREST = PIL.Image.NEAREST
 
 def pyramid_scale_factors(nlevels=3):
+    '''Returns the pyramid downscaling factors for the given number of levels.'''
     return [0.5**l for l in range(nlevels)][::-1]
 
 def borderless_view(x, border):    
+    '''Returns a view of the image without border of given size.'''
     b = border
     if b > 0:
         if isinstance(x, torch.Tensor):
@@ -83,7 +106,8 @@ def borderless_view(x, border):
 
 Border = namedtuple('Border', 'tl t tr r br b bl l ft fr fb fl')
 
-def border_elements(x, b):    
+def border_elements(x, b):
+    '''Returns the border elements of given border size of image.'''
 
     if isinstance(x, torch.Tensor):
         h, w = x.shape[-2:]
@@ -122,6 +146,8 @@ def border_elements(x, b):
         )
 
 class Image(np.ndarray):
+    '''Convenience class for images represented as numpy arrays.'''
+    
     def __new__(cls, *args, **kwargs):        
         return super(Image, cls).__new__(cls, *args, **kwargs)
 

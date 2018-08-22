@@ -10,6 +10,7 @@ from style.image import borderless_view, Image
 from style.losses import Content
 
 class TiledGeneration:
+    '''Provides tiled image generation for huge image sizes.'''
     
     def __init__(self, st):
         self.st = st

@@ -19,10 +19,3 @@ def tv_prior(x):
     return torch.cat([
         fx.abs().view(-1), 
         fy.abs().view(-1)]).mean()
-
-
-def tv_prior2(x):
-    kernels = x.new_tensor([[0., 1, 0], [1,-4,1], [0,1,0]], dtype=torch.float32).view(1,1,3,3).repeat(3,1,1,1)
-    f = F.conv2d(x, kernels, padding=1, groups=3)
-    v = f.abs().mean()
-    return v

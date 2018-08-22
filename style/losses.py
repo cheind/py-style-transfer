@@ -10,6 +10,16 @@ import torch.nn.functional as F
 from style.image import to_np, to_torch, to_image, NEAREST
 
 class BaseLoss:
+    '''Base loss functor. 
+    
+    Modelled as context manager so that any network hooks are properly 
+    freed after optimization. The optimization will iteratively pass
+    the current state of image reconstruction through the backbone network.
+    Losses should therefore hook different layers of the network and 
+    gather network responses. Upon `__call__` the recorded values are supposed
+    to be converted into a loss of somesort and returned.
+    '''
+
     def __enter__(self):
         self.enter()
         return self
@@ -18,18 +28,19 @@ class BaseLoss:
         self.remove()
 
     def enter(self):
+        '''Called upon entering of context.'''
         pass
 
     def remove(self):
+        '''Called upon leaving the context.'''
         pass
 
-    def init(self):
-        pass
-        
     def __call__(self):
+        '''Returns the loss.'''
         raise NotImplementedError()
 
 class NoopLoss(BaseLoss):
+    ''' A loss that does nothing.'''
     def __init__(self, dev):
         self.z = torch.tensor([0], dtype=torch.float32).to(dev)
 
@@ -37,7 +48,7 @@ class NoopLoss(BaseLoss):
         return self.z
 
 class LossProvider(object):
-    '''Base class for feature map based layer losses.'''
+    '''Base class for providing losses.'''
 
     def __init__(self, layer_ids, lambda_loss):
         self.layer_ids = layer_ids
@@ -47,8 +58,29 @@ class LossProvider(object):
         raise NotImplementedError()
 
 class Content(LossProvider):
+    '''Content loss provider.
+
+    Computes the mean squared error of reconstruction activations and 
+    corresponding content image activations.
+
+    Gatys, Leon A., Alexander S. Ecker, and Matthias Bethge. 
+    "A neural algorithm of artistic style."
+    arXiv preprint arXiv:1508.06576 (2015).
+    '''
 
     def __init__(self, image=None, layer_id=8, lambda_loss=1e-3):
+        '''Create Content loss provider.
+
+        Kwargs
+        ------
+        image : image
+            Style image to be matched.
+        layer_id : number
+            Layer index to compute feature losses at.
+        lambda_loss : scalar
+            Lagrange multiplier strengthness for this loss vs. other losses.
+        '''
+
         super(Content, self).__init__([layer_id], lambda_loss)
 
         if image is not None:
@@ -98,8 +130,29 @@ class Content(LossProvider):
 
 
 class GramStyle(LossProvider):
+    '''Gram style loss provider.
 
-    def __init__(self, image=None, layer_ids=None, layer_weights=None, lambda_loss=1e4):        
+    Computes the style loss between the reconstruction and style image as described in 
+    https://arxiv.org/pdf/1508.06576.pdf
+    '''
+
+    def __init__(self, image=None, layer_ids=None, layer_weights=None, lambda_loss=1e4):   
+        '''Create GramStyle.
+
+        Kwargs
+        ------
+        image : image
+            Style image to be matched.
+        layer_ids : list
+            Optional list of raw network layers to compute feature losses at.
+            If None defaults to [6,8,10].
+        layer_weights : list
+            Optional weights for each layer loss. If None uniform weights are  
+            applied.
+        lambda_loss : scalar
+            Lagrange multiplier strengthness for this loss vs. other losses.
+        '''
+
         if layer_ids is None:
             layer_ids = [6,8,10]
 
@@ -162,8 +215,32 @@ class GramStyle(LossProvider):
             return torch.mm(f, f.t()) / (c*n)
 
 class PatchStyle(GramStyle):
+    '''Patch style loss provider.
 
-    def __init__(self, image=None, layer_ids=None, layer_weights=None, lambda_loss=1e-2, k=3, s=1):        
+    Computes the style loss between the reconstruction and style image as described in 
+    https://arxiv.org/pdf/1601.04589.pdf
+    '''
+
+    def __init__(self, image=None, layer_ids=None, layer_weights=None, lambda_loss=1e-2, k=3, s=1):   
+        '''Create PatchStyle.
+
+        Kwargs
+        ------
+        image : image
+            Style image to be matched.
+        layer_ids : list
+            Optional list of raw network layers to compute feature losses at.
+            If None defaults to [6,8,10].
+        layer_weights : list
+            Optional weights for each layer loss. If None uniform weights are  
+            applied.
+        lambda_loss : scalar
+            Lagrange multiplier strengthness for this loss vs. other losses.
+        k : number
+            Kernel size
+        s : number
+            Stride
+        '''     
         super(PatchStyle, self).__init__(image, layer_ids, layer_weights, lambda_loss)
         self.k = k
         self.s = s
@@ -244,6 +321,12 @@ class PatchStyle(GramStyle):
 
 
 class SemanticStyle(PatchStyle):
+    '''Semantic style loss provider.
+
+    Computes the style loss between the semantically enriched reconstruction and style image 
+    as described in 
+    https://arxiv.org/pdf/1603.01768.pdf
+    '''
 
     def __init__(
         self, 
@@ -252,8 +335,37 @@ class SemanticStyle(PatchStyle):
         semantic_style_image=None, 
         semantic_content_image=None,
         gamma=None,
-        gamma_scale=0.5
+        gamma_scale=0.4
         ):
+
+        '''Create PatchStyle.
+
+        Kwargs
+        ------
+        image : image
+            Style image to be matched.
+        layer_ids : list
+            Optional list of raw network layers to compute feature losses at.
+            If None defaults to [6,8,10].
+        layer_weights : list
+            Optional weights for each layer loss. If None uniform weights are  
+            applied.
+        lambda_loss : scalar
+            Lagrange multiplier strengthness for this loss vs. other losses.
+        k : number
+            Kernel size
+        s : number
+            Stride
+        semantic_style_image : image
+            Semantic map of style
+        semantic_content_image : image
+            Semantic map of content
+        gamma : list, scalar
+            Optional gamma factor for channel concatenation per layer. If None,
+            auto-tunes gamma per layer.
+        gamma_scale : scale
+            Weights the auto-tuned gamma factor.
+        '''
         
         super(SemanticStyle, self).__init__(
             image=image, 

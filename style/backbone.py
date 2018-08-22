@@ -12,6 +12,8 @@ from collections import Iterable
 from style.image import vgg_mean, vgg_std
 
 class Normalize(torch.nn.Module):
+    '''Normalize image tensor with training mean/std.'''
+    
     def __init__(self):
         super(Normalize, self).__init__()
 

@@ -11,6 +11,8 @@ import numpy as np
 from PIL import Image
 
 class Plugin:
+    '''An optimization plugin base class.'''
+
     def prepare(self, p, a, x, **kwargs):
         pass
 
@@ -25,6 +27,7 @@ class Plugin:
     
 
 class SeamlessPlugin(Plugin):
+    '''Changes optimization to generate images that seamless tile.'''
 
     def __init__(self, image_shape, border):   
         self.f = min(image_shape[:2]) / border

@@ -18,9 +18,11 @@ import style.priors as priors
 from style.losses import Content, GramStyle
 
 class IteratedStyleTransfer:
-    def __init__(self, backbone):
-        self.backbone = backbone
+    '''Iteratively generates an image by minimizing content and style losses.'''
 
+    def __init__(self, backbone):
+        '''Initialize from backbone network.'''
+        self.backbone = backbone
 
     def generate(self, 
             style,
@@ -32,6 +34,36 @@ class IteratedStyleTransfer:
             yield_every=0,
             disable_progress=False,
             plugins=None):
+        '''Generate an image by minimizing style and content losses.
+        
+        Params
+        ------
+        style : style.losses.LossProvider
+            A method that provides style losses. Currently one can choose
+            between global GramStyle, PatchStyle and SemanticStyle.
+        
+        Kwargs
+        ------
+        content : style.losses.LossProvider
+            Provides content loss. If None does not compute a content loss.
+        seed : image
+            Initial values of image to be generated. If None, initializes with
+            a white noise image of size equal to content. If content is not available,
+            defaults to white noise of size (256,256,3)
+        lambda_tv : scalar
+            Strengthness of total variation regularization used to avoid noise artefacts
+            in generated image.
+        lr : scalar
+            Learning rate
+        niter : number
+            Number of iterations
+        yield_every : number
+            Yields intermediate results every so often.
+        disable_progress : boolean
+            Disables progress messages.
+        plugins : list, None
+            A optional list of optimization plugins to be invoked during various steps of optimization.
+        '''
 
 
         content = content or Content(layer_id=8)
@@ -97,6 +129,7 @@ class IteratedStyleTransfer:
 
 
     def generate_multiscale(self, nlevels=3, **iterate_kwargs):
+        '''Generate an image by minimizing style and content losses on multiple image resolutions.'''
 
         p = iterate_kwargs.pop('content', None)
         a = iterate_kwargs.pop('style', None)
@@ -111,8 +144,6 @@ class IteratedStyleTransfer:
             if x is not None:
                 x = x.scale_by(f)
             return x
-
-        fshape = x.shape if x is not None else a.shape
 
         x = scale_by(x, f[0])
         with tqdm(total=nlevels) as t: 
@@ -129,9 +160,6 @@ class IteratedStyleTransfer:
 
                 if i < nlevels - 1:
                     x = x.up()
-                else:
-                    # ensure desired shape is matched
-                    x = x.scale_to(fshape)
 
                 t.update()
 
