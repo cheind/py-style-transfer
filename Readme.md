@@ -23,7 +23,7 @@ See the interactive [StyleTransfer.ipynb](StyleTransfer.ipynb) notebook for usag
  [1] Gatys, Leon A., Alexander S. Ecker, and Matthias Bethge. "A neural algorithm of artistic style." arXiv preprint arXiv:1508.06576 (2015).</br>
  [2] Johnson, Justin, Alexandre Alahi, and Li Fei-Fei. "Perceptual losses for real-time style transfer and super-resolution." European Conference on Computer Vision. Springer, Cham, 2016.</br>
  [3] Gatys, Leon A., et al. "Controlling perceptual factors in neural style transfer." IEEE Conference on Computer Vision and Pattern Recognition (CVPR). 2017.</br>
- [4] Li, Chuan, and Michael Wand. "Combining markov random fields and convolutional neural networks for image synthesis." Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition. 2016.
+ [4] Li, Chuan, and Michael Wand. "Combining markov random fields and convolutional neural networks for image synthesis." Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition. 2016.</br>
  [5] Champandard, Alex J. "Semantic style transfer and turning two-bit doodles into fine artworks." arXiv preprint arXiv:1603.01768 (2016).</br>
  
 
