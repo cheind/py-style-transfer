@@ -229,7 +229,7 @@ class SemanticStyle(PatchStyle):
         lambda_loss=1e-2, k=3, s=1,         
         semantic_style_image=None, 
         semantic_content_image=None,
-        gamma=1e1
+        gamma=None
         ):
         
         super(SemanticStyle, self).__init__(
@@ -268,18 +268,35 @@ class SemanticStyle(PatchStyle):
 
         def __init__(self, net, dev, lids, w, image, k, s, sem_style, sem_cont, gamma):
             super(SemanticStyle.Loss, self).__init__(net, dev, lids, w, image, k, s)
-            self.sem_style = to_torch(sem_style).to(dev) * gamma
-            self.sem_cont = to_torch(sem_cont).to(dev) * gamma
+            self.sem_style = to_torch(sem_style).to(dev)
+            self.sem_cont = to_torch(sem_cont).to(dev)
+            self.gamma = gamma
+
 
         def init(self):
             # Called from enter of GramStyle
             with torch.no_grad():
                 self.net(self.image)
-                self.style_act = self.create_stack(self.sem_style)
+                
+                # Auto-tune gamma
+                if self.gamma is None:
+                    self.gamma = [self.tune_gamma(a, self.sem_style) for a in self.act]
+                elif isinstance(self.gamma, Iterable):
+                    assert len(self.gamma) == len(self.act)
+                else:
+                    self.gamma = [self.gamma] * len(self.act)
 
+                self.style_act = self.create_stack(self.sem_style, self.gamma)
+                
+                                
         def __call__(self):
-            self.act = self.create_stack(self.sem_cont)
+            self.act = self.create_stack(self.sem_cont, self.gamma)
             return super(SemanticStyle.Loss, self).__call__()
 
-        def create_stack(self, semantic):
-            return [torch.cat((a, F.adaptive_avg_pool2d(semantic, a.shape[-2:])), 1) for a in self.act]
+        def create_stack(self, semantic, gamma):
+            return [torch.cat((a, F.adaptive_avg_pool2d(semantic, a.shape[-2:])*g), 1) for a,g in zip(self.act, self.gamma)]
+
+        def tune_gamma(self, a, sem):
+            sem = F.adaptive_avg_pool2d(sem, a.shape[-2:])
+            s = torch.norm(a, 2, 1).mean() / torch.norm(sem, 2, 1).mean()
+            return s * 0.5
