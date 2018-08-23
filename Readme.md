@@ -13,10 +13,11 @@ We also extend the approach to two more use-cases
 See the interactive [StyleTransfer.ipynb](StyleTransfer.ipynb) notebook for usage and examples.
 
 ### Features
- - Various style losses: gram-based, patch-based, semantic-based
- - Large images: Support for generating huge image sizes through tiling
- - Seamless: Generate images that stitch seamlessly
- - Extensible: Easily add new losses or modify the optimization through plugins.
+ - Various style losses such as gram-based, patch-based, semantic-based.
+ - Capability to process on multiple scales.
+ - Support for generating huge image sizes through tiling.
+ - Support for generating images that stitch seamlessly.
+ - Easily add new losses or modify the optimization through plugins.
 
 ### References
 

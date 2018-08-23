@@ -300,8 +300,8 @@ class PatchStyle(GramStyle):
             
             nx = torch.norm(pxd, 2, 1) # treat norm as constant during opt
             
-            nxs = torch.split(nx, 2048, dim=0)
-            pxds = torch.split(pxd, 2048, dim=0)
+            nxs = torch.split(nx, 1024, dim=0)
+            pxds = torch.split(pxd, 1024, dim=0)
             
             nids = []
             for pxd_part, nx_part in zip(pxds, nxs):
@@ -438,3 +438,40 @@ class SemanticStyle(PatchStyle):
             sem = F.adaptive_avg_pool2d(sem, a.shape[-2:])
             s = torch.norm(a, 2, 1).mean() / torch.norm(sem, 2, 1).mean()
             return s * self.gamma_scale
+
+
+"""Block matrices could further improve memory efficiency of PatchStyle
+
+x = np.random.rand(1024, 128)
+y = np.random.rand(128, 2048)
+
+def blocks(x, rows, cols):
+    r = np.array_split(x, rows, 0)
+    c = [np.array_split(rr, cols, 1) for rr in r]
+    return np.array(c)
+
+def mul(bx, by):
+    a = bx.shape[0]
+    s = bx.shape[1]    
+    b = by.shape[1]
+    
+    f = np.zeros((bx.shape[0]*bx.shape[2], by.shape[1]*by.shape[3]))
+    
+    
+    for aa in range(a):
+        for bb in range(b):
+            cb = f[aa*bx.shape[2]:(aa+1)*bx.shape[2], bb*by.shape[3]:(bb+1)*by.shape[3]]
+            for ss in range(s):
+                cb += np.dot(bx[aa,ss], by[ss,bb])
+    return f
+    
+    #return np.asarray(c)
+
+
+bx = blocks(x, 4, 2)
+by = blocks(y, 2, 4)
+
+print(bx.shape, by.shape)
+
+(abs(mul(bx, by) - np.dot(x, y))).sum()
+"""
